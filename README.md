@@ -42,14 +42,12 @@ Buka `.env` lalu isi:
 Untuk mendapatkan `CLIENT_ID` dan `CLIENT_SECRET`, daftarkan OAuth consumer di:
 https://meta.wikimedia.org/wiki/Special:OAuthConsumerRegistration
 
-Saat pendaftaran, gunakan callback URL: `http://localhost:5001/auth/callback`
-
 **5. Jalankan server**
 ```bash
-flask run --port 5001
+flask run
 ```
 
-Buka browser di `http://localhost:5001`
+Buka browser di `http://localhost:5000` (atau port yang ditampilkan di terminal)
 
 ## Fitur
 
