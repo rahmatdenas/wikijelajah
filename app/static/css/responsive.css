@@ -1,0 +1,174 @@
+/* ==========================================================================
+   RESPONSIVE — Mobile bottom-sheet layout
+   Panel berubah menjadi bottom sheet yang bisa di-drag dari bawah.
+   ========================================================================== */
+
+@media (max-width: 800px) {
+  html, body { height: 100%; overflow: hidden; }
+
+  /* Top nav: lebih compact */
+  #top-nav {
+    height: 44px;
+    padding: 0 var(--space-4);
+    gap: var(--space-2);
+  }
+
+  .top-nav-logo { width: 24px; height: 24px; }
+  .top-nav-title { font-size: var(--text-base); }
+  .top-nav-sub { display: none !important; }
+
+  /* Tombol login: lebih kecil */
+  .top-nav-btn {
+    padding: 5px var(--space-3);
+    font-size: var(--text-xs);
+    gap: var(--space-1);
+  }
+
+  .top-nav-btn .wikimedia-w { width: 14px; height: 14px; }
+
+  /* App body */
+  #app-body {
+    position: relative;
+    overflow: hidden;
+  }
+
+  #panel,
+  #map {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    flex: none;
+  }
+
+  #map { z-index: var(--z-map); }
+
+  #panel {
+    z-index: var(--z-panel);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    box-shadow: 0 -4px 18px rgba(0, 0, 0, 0.3);
+    overflow: hidden;
+    transform: translateY(calc(100% - 56px));
+    transition: transform var(--transition-slow);
+  }
+
+  #panel.dragging { transition: none; }
+
+  /* Nav bawah: full-width + safe area iOS */
+  #panel-nav {
+    width: 100%;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+
+  /* --- Handle bottom-sheet (hanya mobile) --- */
+  #panel-handle {
+    display: flex;
+    flex-shrink: 0;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    height: 52px;
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    background: linear-gradient(to bottom, #9b0d0b, #550303);
+  }
+
+  #panel-handle:active { cursor: grabbing; }
+
+  .handle-grip {
+    width: 36px;
+    height: 4px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.45);
+  }
+
+  .handle-label {
+    font-family: var(--font-ui);
+    font-size: var(--text-xs);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: rgba(255, 255, 255, 0.6);
+  }
+
+  /* --- Panel landing: lebih compact di mobile --- */
+  #panel-landing {
+    padding: var(--space-4) var(--space-4) calc(var(--nav-height) + var(--space-8));
+    gap: var(--space-2);
+  }
+
+  #panel-landing h2 { font-size: var(--text-lg); margin: 0 0 var(--space-1) 0; padding: 0; }
+
+  .form-group { gap: var(--space-1); }
+
+  .form-select,
+  .form-input {
+    font-size: var(--text-md);
+    padding: var(--space-2) var(--space-3);
+  }
+
+  .btn--large { font-size: var(--text-base); padding: var(--space-3) var(--space-8); }
+
+  /* Q-ID input lebih kecil */
+  #wadah-qid .form-label { font-size: 9px; }
+  .qid-input { font-size: var(--text-xs) !important; padding: var(--space-2) var(--space-3) !important; }
+
+  /* --- Panel hasil: list lebih compact --- */
+  .filter-header { padding: var(--space-3) var(--space-4); }
+  .filter-row { gap: var(--space-2); margin-bottom: var(--space-2); }
+  .feature-btns { padding-top: var(--space-2); gap: var(--space-2); }
+
+  .search-input { font-size: var(--text-base); padding: var(--space-2) var(--space-8) var(--space-2) var(--space-3); }
+
+  /* List items: touch target lebih besar */
+  .result-list__link { padding: 10px var(--space-8); margin: 0; }
+  .result-list__sub  { font-size: 11px; }
+
+  /* --- Panel detail: full content --- */
+  #panel-details {
+    padding: 0 var(--space-4) calc(var(--nav-height) + var(--space-4));
+    overflow-y: auto;
+  }
+
+  .detail-panel { padding: 0 0 var(--space-4); }
+
+  .detail-back-bar {
+    padding: var(--space-3) 0;
+    margin-bottom: var(--space-3);
+  }
+
+  .detail-title { font-size: var(--text-lg); }
+
+  /* Detail: stack vertikal di mobile */
+  .detail-lead { flex-direction: column-reverse; gap: var(--space-3); }
+  .detail-lead-media { width: 100%; }
+  .detail-img { height: 200px; }
+  .detail-no-image { width: 100%; min-height: 90px; }
+
+  .detail-table { font-size: var(--text-sm); }
+  .detail-excerpt { font-size: var(--text-sm); line-height: 1.6; }
+
+  /* --- Panel about --- */
+  #panel-about { padding: var(--space-4) var(--space-4) calc(var(--nav-height) + var(--space-4)); }
+
+  /* Grid gambar: tetap 2 kolom, tapi item lebih kecil */
+  .result-grid { gap: 1px; }
+
+  /* --- Popup peta lebih besar di mobile --- */
+  .wj-popup .leaflet-popup-content { width: 240px !important; }
+  .map-popup-img { height: 130px; }
+}
+
+/* Sangat sempit — iPhone SE / Android lama */
+@media (max-width: 380px) {
+  .top-nav-title { display: none; }
+
+  .feature-btn { font-size: 9px; padding: 5px 3px; }
+
+  .result-list__link { font-size: var(--text-sm); }
+
+  .detail-title { font-size: var(--text-base); }
+}

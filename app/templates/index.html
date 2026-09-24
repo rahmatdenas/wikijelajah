@@ -1,0 +1,230 @@
+{% extends "base.html" %}
+
+{% block body %}
+
+{# =========================================================
+   TOP NAVIGATION BAR (di atas peta)
+   ========================================================= #}
+<header id="top-nav">
+  <div class="top-nav-brand">
+    <img src="{{ url_for('static', filename='img/logobaru.png') }}"
+         alt="WikiJelajah" class="top-nav-logo">
+    <span class="top-nav-title">WikiJelajah</span>
+  </div>
+  <div class="top-nav-auth">
+    {% if user %}
+    <a href="https://www.mediawiki.org/wiki/User:{{ user.username | urlencode }}"
+       target="_blank" rel="noopener noreferrer"
+       class="top-nav-user-link" title="Lihat profil Wikimedia">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+        <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+      </svg>
+      <span class="top-nav-username">{{ user.username }}</span>
+    </a>
+    <a href="{{ url_for('auth.logout') }}" class="top-nav-btn">Keluar</a>
+    {% else %}
+    <a href="{{ url_for('auth.login') }}" class="top-nav-btn top-nav-btn--login">
+      <svg class="wikimedia-w" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.5 14.5l-3-8h1.5l1.8 5.2 1.8-5.2h1.5l1.8 5.2 1.8-5.2H18l-3 8-2-5.5-2 5.5z"/>
+      </svg>
+      Masuk dengan Wikimedia
+    </a>
+    {% endif %}
+  </div>
+</header>
+
+<div id="app-body">
+
+{# =========================================================
+   PANEL KIRI
+   ========================================================= #}
+<section id="panel">
+
+  {# Handle — hanya terlihat di mobile (bottom-sheet) #}
+  <div id="panel-handle" aria-hidden="true">
+    <div class="handle-grip"></div>
+    <span class="handle-label">WikiJelajah</span>
+  </div>
+
+  {# -------------------------------------------------------
+     SEKSI: LANDING (Eksplorasi)
+     ------------------------------------------------------- #}
+  <section id="panel-landing" class="panel-section">
+    <h2>Mulai Eksplorasi</h2>
+
+    {# 1. Pilih tipe wilayah #}
+    <div class="form-group">
+      <label class="form-label" for="select-wilayah-tipe">Tentukan Wilayah</label>
+      <select id="select-wilayah-tipe" class="form-select">
+        <option value="provinsi" selected>Provinsi di Indonesia</option>
+        <option value="all">Seluruh Indonesia</option>
+        <option value="luar_negeri">Luar Negeri</option>
+      </select>
+    </div>
+
+    {# 2a. Dropdown provinsi #}
+    <div id="wadah-provinsi" class="form-group">
+      <label class="form-label" for="select-provinsi">Pilih Provinsi</label>
+      <select id="select-provinsi" class="form-select">
+        {% for value, label in wilayah_provinsi %}
+        <option value="{{ value }}">{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+
+    {# 2b. Dropdown luar negeri — dirender server-side sebagai optgroup #}
+    <div id="wadah-luar-negeri" class="form-group hidden">
+      <label class="form-label" for="select-negara">Pilih Negara</label>
+      <select id="select-negara" class="form-select">
+        {% for benua, negara_list in wilayah_luar_negeri.items() %}
+        <optgroup label="{{ benua|capitalize }}">
+          {% for value, label in negara_list %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+    </div>
+
+    {# 3. Kategori data #}
+    <div class="form-group">
+      <label class="form-label" for="select-kategori">Pilih Kategori Data</label>
+      <select id="select-kategori" class="form-select">
+        <option disabled selected value="">— Pilih kategori —</option>
+        {% for group in kategori_data %}
+          {% if group.group %}
+          <optgroup label="{{ group.group }}">
+          {% endif %}
+          {% for value, label, attrs in group['items'] %}
+          <option value="{{ value }}"
+            {% for k, v in attrs.items() %}{{ k }}="{{ v }}" {% endfor %}>{{ label }}</option>
+          {% endfor %}
+          {% if group.group %}
+          </optgroup>
+          {% endif %}
+        {% endfor %}
+      </select>
+    </div>
+
+    {# Q-ID — terisi otomatis dari pilihan kategori, atau isi manual jika "Ketik Q-ID Sendiri" #}
+    <div class="form-group" id="wadah-qid">
+      <label class="form-label" for="input-qid">Q-ID Wikidata</label>
+      <input type="text" id="input-qid" class="form-input qid-input" readonly
+             placeholder="Pilih kategori di atas…">
+    </div>
+
+    <button id="btn-jelajahi" class="btn btn--primary btn--full btn--large">
+      Jelajahi
+    </button>
+  </section>
+
+  {# -------------------------------------------------------
+     SEKSI: HASIL + status loading inline (seperti original)
+     Panel ini langsung muncul saat "Jelajahi" diklik.
+     Status loading ditampilkan di dalam list, bukan panel terpisah.
+     ------------------------------------------------------- #}
+  <section id="panel-hasil" class="panel-section hidden">
+
+    {# Status bar loading — disembunyikan setelah selesai #}
+    <div id="hasil-loading-bar" class="hasil-loading-bar hidden">
+      <div class="loader loader--small"></div>
+      <span id="hasil-loading-text">Menarik data…</span>
+      <button id="btn-batalkan" class="btn-batalkan-kecil">Batalkan</button>
+    </div>
+
+    <div class="filter-header">
+      <div class="filter-row">
+        <select id="filter-wilayah" class="form-select">
+          <option value="all">Semua Wilayah</option>
+        </select>
+        <select id="filter-urut" class="form-select"></select>
+      </div>
+      <div class="feature-btns">
+        <button class="feature-btn loading" id="btn-jelajahi-artikel" data-filter="article">Jelajahi Artikel</button>
+        <button class="feature-btn loading" id="btn-jelajahi-gambar"  data-filter="image">Jelajahi Gambar</button>
+        <button class="feature-btn loading" id="btn-semua-hasil"      data-filter="all">Semua Hasil</button>
+      </div>
+    </div>
+
+    <input type="search" id="search-input" class="search-input"
+           placeholder="Menghitung data…" autocomplete="off">
+
+    <div id="hasil-container">
+      <div id="loading-center" class="loading-state hidden">
+        <div class="loader loader--center"></div>
+        <p class="loading-title" id="loading-center-text">Menarik data…</p>
+        <p class="loading-subtitle" id="loading-center-sub"></p>
+      </div>
+      <ol id="hasil-list" class="result-list"></ol>
+    </div>
+  </section>
+
+  {# -------------------------------------------------------
+     SEKSI: DETAIL
+     ------------------------------------------------------- #}
+  <section id="panel-details" class="panel-section hidden"></section>
+
+  {# -------------------------------------------------------
+     SEKSI: TENTANG
+     ------------------------------------------------------- #}
+  <section id="panel-about" class="panel-section hidden">
+    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Portal_Mosque_icon.svg/60px-Portal_Mosque_icon.svg.png"
+         alt="WikiSurau" style="float:right;margin:0 0 10px 10px;width:60px">
+    <p>
+      WikiSurau merupakan program pendokumentasian bangunan bersejarah berupa masjid dan surau tua
+      di Sumatra Barat. Di Minangkabau, masjid merupakan syarat berdirinya suatu nagari (desa/kelurahan).
+    </p>
+    <p>
+      Banyak masjid dan surau tua di Sumatra Barat telah ditetapkan sebagai cagar budaya.
+      Namun, bangunannya dapat hancur bila terjadi gempa bumi yang sering melanda Sumatra Barat.
+    </p>
+    <p>
+      Aplikasi ini dikembangkan oleh Wikimedia Indonesia dan masih dalam tahap pengerjaan.
+    </p>
+  </section>
+
+  {# --- Navigasi Bawah --- #}
+  <nav id="panel-nav" aria-label="Navigasi utama">
+    {# Nav standar #}
+    <ul id="nav-standar">
+      <li class="text-left">
+        <a href="#" id="nav-beranda">Beranda</a>
+      </li>
+      <li class="text-center">
+        <a href="#" id="nav-hasil">Hasil</a>
+      </li>
+      <li class="text-right">
+        <a href="#" id="nav-tentang">Tentang</a>
+      </li>
+    </ul>
+
+    {# Nav detail (saat membuka item) #}
+    <ul id="nav-detail" class="hidden">
+      <li class="flex-1 text-left"><a id="btn-prev" class="cursor-pointer fw-bold">Sebelumnya</a></li>
+      <li class="flex-1 text-center"><a href="#" id="nav-kembali-hasil">Hasil</a></li>
+      <li class="flex-1 text-right"><a id="btn-next" class="cursor-pointer fw-bold">Selanjutnya</a></li>
+    </ul>
+  </nav>
+
+</section>{# /panel #}
+
+{# =========================================================
+   PETA
+   ========================================================= #}
+<section id="map" aria-label="Peta interaktif"></section>
+
+</div>{# /app-body #}
+
+{# Overlay & dialog mode game #}
+<div id="game-overlay" class="hidden" aria-hidden="true"></div>
+<div id="game-dialog" class="hidden" role="dialog" aria-modal="true">
+  <h3 id="game-title">Tantangan Game!</h3>
+  <p id="game-message"></p>
+</div>
+
+{% endblock %}
+
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/main.js') }}"></script>
+{% endblock %}

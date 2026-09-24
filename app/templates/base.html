@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <title>{% block title %}{{ config.APP_NAME }}{% endblock %} – {{ config.APP_TAGLINE }}</title>
+  <link rel="icon" href="{{ url_for('static', filename='img/logobaru.ico') }}" type="image/x-icon">
+
+  {# Fonts #}
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:400,600,700|Merriweather:300,300i&display=swap">
+
+  {# Leaflet #}
+  <link rel="preconnect" href="https://unpkg.com">
+  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol/dist/L.Control.Locate.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+
+  {# App CSS #}
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/tokens.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/map.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/responsive.css') }}">
+
+  {% block extra_head %}{% endblock %}
+</head>
+<body>
+
+{# Preloader — disembunyikan JS setelah halaman siap #}
+<div id="preloader" aria-hidden="true">
+  <div class="loader"></div>
+</div>
+
+{% block body %}{% endblock %}
+
+{# Dialog konfirmasi / alert kustom #}
+<div id="dialog-overlay" class="dialog-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="dialog-title">
+  <div class="dialog-box">
+    <h3 class="dialog-title" id="dialog-title">Peringatan</h3>
+    <p class="dialog-body" id="dialog-message">Pesan di sini</p>
+    <div class="dialog-actions">
+      <button id="dialog-btn-cancel" class="btn btn--secondary">Batal</button>
+      <button id="dialog-btn-confirm" class="btn btn--primary">OK</button>
+    </div>
+  </div>
+</div>
+
+{# Lightbox gambar #}
+<div id="lightbox-overlay" class="lightbox-overlay hidden" role="dialog" aria-modal="true">
+  <div class="lightbox-content">
+    <img id="lightbox-img" src="" alt="" class="lightbox-img">
+    <button class="lightbox-close" aria-label="Tutup">&times;</button>
+  </div>
+</div>
+
+{# Modal Upload Foto #}
+<div id="upload-modal" class="upload-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="upload-modal-title">
+  <div class="upload-modal-box">
+    <div class="upload-modal-header">
+      <h3 id="upload-modal-title">Upload Foto ke Commons</h3>
+      <button class="upload-modal-close" id="upload-modal-close" aria-label="Tutup">&times;</button>
+    </div>
+    <div class="upload-modal-body">
+
+      <div class="upload-drop-zone" id="upload-drop-zone">
+        <input type="file" id="upload-file-input" accept="image/jpeg,image/png,image/webp" class="upload-file-input">
+        <div class="upload-drop-label" id="upload-drop-label">
+          <svg viewBox="0 0 24 24" width="36" height="36" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+          <span>Klik atau seret foto ke sini</span>
+          <small>JPG · PNG · WebP &nbsp;·&nbsp; Maks 10 MB</small>
+        </div>
+        <img id="upload-preview-img" class="upload-preview-img hidden" alt="Preview">
+      </div>
+
+      <div class="upload-form-fields">
+        <div class="form-group">
+          <label class="form-label" for="upload-filename">Nama file di Commons</label>
+          <input type="text" id="upload-filename" class="form-input" placeholder="Nama_file.jpg">
+          <small class="upload-hint">Gunakan huruf, angka, titik, dan garis bawah</small>
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="upload-caption">Keterangan foto</label>
+          <input type="text" id="upload-caption" class="form-input" placeholder="Contoh: Tampak depan masjid …">
+        </div>
+        <div class="upload-license-notice">
+          <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+          Foto akan dipublikasikan dengan lisensi <strong>CC BY-SA 4.0</strong>
+        </div>
+      </div>
+
+      <div id="upload-status" class="upload-status hidden"></div>
+    </div>
+    <div class="upload-modal-footer">
+      <button class="btn btn--secondary" id="upload-btn-cancel">Batal</button>
+      <button class="btn btn--primary" id="upload-btn-submit" disabled>
+        <span id="upload-btn-label">Upload</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+{# Modal Tautkan Foto dari Commons #}
+<div id="link-photo-modal" class="upload-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="link-photo-modal-title">
+  <div class="upload-modal-box">
+    <div class="upload-modal-header">
+      <h3 id="link-photo-modal-title">Tautkan Foto dari Commons</h3>
+      <button class="upload-modal-close" id="link-photo-modal-close" aria-label="Tutup">&times;</button>
+    </div>
+    <div class="upload-modal-body">
+      <p class="upload-hint">Tempel URL halaman file atau nama file dari Wikimedia Commons.</p>
+      <div class="form-group">
+        <label class="form-label" for="link-photo-input">URL atau nama file</label>
+        <input type="text" id="link-photo-input" class="form-input"
+               placeholder="https://commons.wikimedia.org/wiki/File:Nama.jpg">
+      </div>
+      <div id="link-photo-preview-area" class="link-photo-preview hidden">
+        <img id="link-photo-preview-img" src="" alt="Preview" class="link-photo-preview-img">
+        <p id="link-photo-preview-name" class="link-photo-preview-name"></p>
+      </div>
+      <div id="link-photo-status" class="upload-status hidden"></div>
+    </div>
+    <div class="upload-modal-footer">
+      <button class="btn btn--secondary" id="link-photo-btn-cancel">Batal</button>
+      <button class="btn btn--primary" id="link-photo-btn-submit" disabled>
+        <span id="link-photo-btn-label">Tautkan ke Wikidata</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+{# Leaflet JS #}
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol/dist/L.Control.Locate.min.js" charset="utf-8"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/osmtogeojson@3.0.0-beta.5/osmtogeojson.js" crossorigin="anonymous"></script>
+
+{# Status login — dibaca main.js #}
+<script>const APP_USER = {{ user | tojson if user else 'null' }};</script>
+
+{# App JS — urutan penting: wikidata & map dulu, baru main #}
+<script src="{{ url_for('static', filename='js/wikidata.js') }}"></script>
+<script src="{{ url_for('static', filename='js/map.js') }}"></script>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

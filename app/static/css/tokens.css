@@ -1,0 +1,79 @@
+/* ==========================================================================
+   DESIGN TOKENS — WikiJelajah
+   Satu tempat untuk semua warna, tipografi, dan spacing.
+   ========================================================================== */
+:root {
+  /* Warna utama */
+  --color-primary:        #7b0d0c;
+  --color-primary-hover:  #a22222;
+  --color-primary-dark:   #6f0909;
+  --color-primary-light:  #9b0d0b;
+
+  /* Warna aksen (pink-merah terang) */
+  --color-accent:         #eeaaaa;
+  --color-accent-bg:      #f3e9e9;
+  --color-accent-text:    #661111;
+  --color-accent-muted:   #a65959;
+
+  /* Warna netral */
+  --color-white:   #ffffff;
+  --color-gray-50: #f5f5f5;
+  --color-gray-100:#f4f4f4;
+  --color-gray-200:#eeeeee;
+  --color-gray-400:#cccccc;
+  --color-gray-500:#888888;
+  --color-gray-700:#444444;
+  --color-gray-900:#000000;
+
+  /* Warna status */
+  --color-error: #cc0000;
+
+  /* Tipografi */
+  --font-ui:      'Open Sans', sans-serif;
+  --font-content: 'Merriweather', serif;
+
+  --text-xs:   10px;
+  --text-sm:   11px;
+  --text-base: 12.5px;
+  --text-md:   13px;
+  --text-lg:   16px;
+  --text-xl:   19px;
+  --text-2xl:  24px;
+
+  /* Spacing */
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  10px;
+  --space-4:  12px;
+  --space-5:  15px;
+  --space-6:  17px;
+  --space-8:  20px;
+  --space-10: 25px;
+  --space-16: 40px;
+
+  /* Radius */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 16px;
+
+  /* Lebar panel */
+  --panel-width: 460px;
+
+  /* Tinggi top nav dan navigasi bawah */
+  --top-nav-height: 46px;
+  --nav-height: 36px;
+
+  /* Transisi */
+  --transition-fast:   0.15s ease-in-out;
+  --transition-normal: 0.2s ease-in-out;
+  --transition-slow:   0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+
+  /* Z-index layers */
+  --z-map:      1;
+  --z-panel:    500;
+  --z-nav:      9999;
+  --z-overlay:  9997;
+  --z-dialog:   10000;
+  --z-preloader:999999;
+}

@@ -1,0 +1,343 @@
+/* ==========================================================================
+   BASE — Reset, layout utama, dan tipografi global
+   ========================================================================== */
+
+/* --- Reset minimal --- */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+}
+
+body {
+  display: flex;
+  flex-direction: column;
+  font-family: var(--font-ui);
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Izinkan seleksi teks di elemen interaktif & konten */
+input, textarea, select,
+#panel-details, #panel-details *,
+#panel-about, #panel-about * {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* ==========================================================================
+   TOP NAVIGATION BAR (di atas peta)
+   ========================================================================== */
+
+#top-nav {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  height: var(--top-nav-height, 48px);
+  padding: 0 var(--space-6);
+  background: var(--color-primary-dark);
+  z-index: calc(var(--z-nav) + 10);
+  gap: var(--space-4);
+}
+
+.top-nav-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  text-decoration: none;
+  flex: 1;
+}
+
+.top-nav-logo {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  opacity: 0.9;
+}
+
+.top-nav-title {
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--color-white);
+  letter-spacing: -0.3px;
+}
+
+.top-nav-sub {
+  font-size: var(--text-xs);
+  color: var(--color-accent-muted);
+  font-weight: 400;
+  margin-left: 2px;
+  display: none;
+}
+
+@media (min-width: 600px) {
+  .top-nav-sub { display: inline; }
+}
+
+.top-nav-auth {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+
+.top-nav-user-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 5px var(--space-3);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--color-white);
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.25);
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.top-nav-user-link:hover {
+  background-color: rgba(255,255,255,0.2);
+  border-color: rgba(255,255,255,0.5);
+}
+
+.top-nav-username {
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.top-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-4);
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-white);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.top-nav-btn:hover { background-color: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.6); }
+
+.top-nav-btn--login {
+  background-color: rgba(255,255,255,0.1);
+  border-color: rgba(255,255,255,0.4);
+}
+
+.wikimedia-w { flex-shrink: 0; }
+
+/* ==========================================================================
+   LAYOUT UTAMA: Panel kiri + Peta kanan
+   ========================================================================== */
+
+#app-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  min-height: 0;
+}
+
+#panel {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 var(--panel-width);
+  height: 100%;
+  position: relative;
+  z-index: var(--z-nav);
+}
+
+/* Sembunyikan handle di desktop — hanya muncul di mobile (responsive.css) */
+#panel-handle { display: none; }
+
+#map {
+  flex: 1;
+  z-index: var(--z-map);
+}
+
+/* ==========================================================================
+   JUDUL PANEL-LANDING
+   ========================================================================== */
+
+#panel-landing h2 {
+  margin: 0 0 var(--space-4) 0;
+  padding: var(--space-6) var(--space-6) 0;
+  font-size: var(--text-lg);
+  font-weight: 700;
+  color: var(--color-primary);
+}
+
+/* ==========================================================================
+   NAVIGASI BAWAH
+   ========================================================================== */
+
+#panel-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: var(--panel-width);
+  background: var(--color-primary-dark);
+  z-index: var(--z-nav);
+}
+
+#panel-nav ul {
+  display: flex;
+  list-style: none;
+  margin: 12px 0;
+  padding: 0;
+}
+
+#panel-nav li { flex: 1; }
+#panel-nav li:first-child { padding-left: var(--space-8); }
+#panel-nav li:last-child  { padding-right: var(--space-8); }
+#panel-nav li:nth-child(2) {
+  border-left: 1px solid var(--color-accent);
+  border-right: 1px solid var(--color-accent);
+}
+
+#panel-nav a {
+  display: block;
+  padding: 6px 0;
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+  text-decoration: none;
+  color: var(--color-accent);
+  transition: color var(--transition-normal);
+  cursor: pointer;
+}
+
+#panel-nav a:hover,
+#panel-nav a.active { color: var(--color-white); }
+
+/* Sub-menu "Lainnya" */
+#nav-submenu {
+  display: flex;
+  flex-direction: column;
+  position: absolute;
+  bottom: var(--nav-height);
+  right: 0;
+  min-width: 100%;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  z-index: var(--z-nav);
+}
+
+#nav-submenu li {
+  background: rgba(245, 245, 245, 0.92);
+  height: 40px;
+  margin-top: 1px;
+  animation: fadeIn var(--transition-normal) both;
+}
+
+#nav-submenu a {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--space-8);
+  color: var(--color-accent-text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+#nav-submenu li:hover { background: var(--color-primary); }
+#nav-submenu li:hover a { color: var(--color-white); }
+
+#nav-submenu li:nth-child(1) { animation-delay: 0.00s; }
+#nav-submenu li:nth-child(2) { animation-delay: 0.05s; }
+#nav-submenu li:nth-child(3) { animation-delay: 0.10s; }
+#nav-submenu li:nth-child(4) { animation-delay: 0.15s; }
+#nav-submenu li:nth-child(5) { animation-delay: 0.20s; }
+
+/* ==========================================================================
+   PANEL SECTIONS (konten yang bisa tampil bergantian)
+   ========================================================================== */
+
+.panel-section {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--color-white);
+  padding-bottom: calc(var(--nav-height) + var(--space-4));
+}
+
+/* ==========================================================================
+   LOADER
+   ========================================================================== */
+
+.loader {
+  display: block;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 4px solid rgba(136, 34, 34, 0.2);
+  border-left-color: var(--color-primary-hover);
+  animation: spin 1.1s infinite linear;
+}
+
+.loader--center { margin: var(--space-8) auto; }
+.loader--small  { width: 20px; height: 20px; border-width: 2px; }
+
+#panel-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  flex: 1;
+  background: var(--color-white);
+}
+
+/* ==========================================================================
+   PRELOADER
+   ========================================================================== */
+
+#preloader {
+  position: fixed;
+  inset: 0;
+  background: var(--color-white);
+  z-index: var(--z-preloader);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.4s ease, visibility 0.4s ease;
+}
+
+#preloader.hidden { opacity: 0; visibility: hidden; }
+
+/* ==========================================================================
+   UTILITAS
+   ========================================================================== */
+
+.hidden     { display: none !important; }
+.text-left  { text-align: left; }
+.text-center{ text-align: center; }
+.text-right { text-align: right; }
+.text-muted { color: var(--color-gray-500); font-style: italic; }
+.text-error { color: var(--color-error); }
+.fw-bold    { font-weight: bold; }
+.cursor-pointer { cursor: pointer; }
+
+/* ==========================================================================
+   ANIMASI
+   ========================================================================== */
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
