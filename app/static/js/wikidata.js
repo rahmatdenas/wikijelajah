@@ -9,6 +9,7 @@ const WD_SPARQL_URL = 'https://query.wikidata.org/sparql';
 const WD_COMMONS_URL = 'https://commons.wikimedia.org/wiki/';
 const WD_COMMONS_API = 'https://commons.wikimedia.org/w/api.php';
 const WD_WIKI_API = 'https://id.wikipedia.org/w/api.php';
+const WD_API = 'https://www.wikidata.org/w/api.php';
 const WD_PAGE_SIZE = 5000;
 const WD_COORD_BATCH = 1000;
 const WD_MEDIA_BATCH = 200;
@@ -41,7 +42,7 @@ WHERE {
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
   BIND(SUBSTR(STR(?l),32) AS ?LQ)
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "id". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul". }
 }`;
 
 const _T_ITEMS_ANY = `SELECT DISTINCT ?SQ ?sLabel ?PQ ?pLabel ?LQ ?lLabel ?tM ?tP
@@ -66,7 +67,7 @@ WHERE {
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
   BIND(SUBSTR(STR(?l),32) AS ?LQ)
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "id". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul". }
 }`;
 
 const _T_ITEMS_NATIONAL = `SELECT DISTINCT ?SQ ?sLabel ?PQ ?pLabel ?lLabel ?tM ?tP
@@ -86,7 +87,7 @@ WHERE {
   }
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "id". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul". }
   LIMIT <LIMIT> OFFSET <OFFSET>
 }`;
 
@@ -112,7 +113,7 @@ WHERE {
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
   BIND(SUBSTR(STR(?l),32) AS ?LQ)
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul". }
 }`;
 
 const _T_COORDS = `SELECT DISTINCT ?siteQid ?coord WHERE {
@@ -525,207 +526,319 @@ function commonsFilePageUrl(filename) {
 }
 
 // ---------------------------------------------------------------------------
-// DETAIL QUERY (Query 6) — data dinamis per klaster
+// SKEMA ATRIBUT PER KATEGORI
+// Setiap kategori punya daftar atribut tetap. Atribut yang kosong tetap
+// ditampilkan dan bisa diisi langsung. Untuk menambah atribut, cukup tambah
+// entri di ATRIBUT lalu masukkan ke daftar kategori di SKEMA_KATEGORI.
+//
+// type: 'item' | 'quantity' | 'time' | 'url' | 'string'
+// unit: QID satuan default saat menambah nilai (quantity)
+// unitLabel: teks satuan yang ditampilkan bila nilai memakai satuan default
+// suffix: teks tambahan setelah angka (quantity tanpa satuan)
 // ---------------------------------------------------------------------------
-function buildDetailQuery(qid, klasterNama) {
-  const klaster = klasterNama || '';
 
-  let sel = `SELECT ?siteQid (GROUP_CONCAT(DISTINCT ?tipeLabel; SEPARATOR=", ") AS ?tipeList) (SAMPLE(?ketVal) AS ?ketinggian) (SAMPLE(?luasData) AS ?luas) `;
-  let whr = `
-  VALUES ?site { wd:${qid} }
-  OPTIONAL {
-    ?site wdt:P31 ?tipeVal .
-    OPTIONAL { ?tipeVal rdfs:label ?tipeLabelId . FILTER(LANG(?tipeLabelId) = "id") }
-    BIND(COALESCE(?tipeLabelId, REPLACE(STR(?tipeVal), "^.*/", "")) AS ?tipeLabel)
-  }
-  OPTIONAL { ?site wdt:P2044 ?ketVal . }
-  OPTIONAL {
-    ?site p:P2046 ?luasStmt .
-    ?luasStmt psv:P2046 ?luasNode .
-    ?luasNode wikibase:quantityAmount ?luasVal .
-    OPTIONAL { ?luasNode wikibase:quantityUnit ?luasUnitItem . ?luasUnitItem rdfs:label ?luasUnitLabel . FILTER(LANG(?luasUnitLabel) = "id") }
-    OPTIONAL { ?luasStmt pq:P518 ?luasBagianItem . ?luasBagianItem rdfs:label ?luasBagianLabel . FILTER(LANG(?luasBagianLabel) = "id") }
-    BIND(CONCAT(STR(?luasVal), "|", IF(BOUND(?luasUnitLabel), ?luasUnitLabel, ""), "|", IF(BOUND(?luasBagianLabel), ?luasBagianLabel, "")) AS ?luasData)
-  }
-  `;
+const Q_METER = 'Q11573';
+const Q_KM2   = 'Q712226';
 
-  const KB = ['Masjid','Bangunan bersejarah','Gereja & katedral','Vihara & kelenteng',
-    'Rumah sakit','Sekolah','Universitas & kampus','Perpustakaan','Istana','Bandar udara',
-    'Terminal bus','Stadion & lapangan olahraga','Kuil & candi','Benteng dan bunker',
-    'Bangunan secara umum dan struktur arsitektur','Pasar dan mall','Hotel dan resor',
-    'Monumen, patung, & memorial','Museum','Stasiun kereta api'];
+const ATRIBUT = {
+  lokasi:          { pid: 'P131',  label: 'Lokasi',             type: 'item' },
+  lokasiObjek:     { pid: 'P276',  label: 'Lokasi',             type: 'item' },
+  didirikan:       { pid: 'P571',  label: 'Didirikan',          type: 'time' },
+  ditetapkan:      { pid: 'P571',  label: 'Ditetapkan',         type: 'time' },
+  dibuat:          { pid: 'P571',  label: 'Dibuat',             type: 'time' },
+  kapasitas:       { pid: 'P1083', label: 'Kapasitas',          type: 'quantity', suffix: 'orang' },
+  gaya:            { pid: 'P149',  label: 'Gaya arsitektur',    type: 'item' },
+  arsitek:         { pid: 'P84',   label: 'Arsitek',            type: 'item' },
+  agama:           { pid: 'P140',  label: 'Agama',              type: 'item' },
+  denominasi:      { pid: 'P140',  label: 'Agama/denominasi',   type: 'item' },
+  warisan:         { pid: 'P1435', label: 'Status warisan',     type: 'item' },
+  laman:           { pid: 'P856',  label: 'Laman resmi',        type: 'url' },
+  koleksiJumlah:   { pid: 'P1436', label: 'Jumlah koleksi',     type: 'quantity' },
+  pengunjung:      { pid: 'P1174', label: 'Pengunjung/tahun',   type: 'quantity', suffix: 'orang' },
+  tempatTerbit:    { pid: 'P291',  label: 'Tempat terbit',      type: 'item' },
+  tanggalTerbit:   { pid: 'P577',  label: 'Tanggal terbit',     type: 'time' },
+  penerbit:        { pid: 'P123',  label: 'Penerbit',           type: 'item' },
+  bahasa:          { pid: 'P407',  label: 'Bahasa',             type: 'item' },
+  tempatTemu:      { pid: 'P189',  label: 'Tempat ditemukan',   type: 'item' },
+  tanggalTemu:     { pid: 'P575',  label: 'Tanggal ditemukan',  type: 'time' },
+  bahan:           { pid: 'P186',  label: 'Bahan',              type: 'item' },
+  koleksi:         { pid: 'P195',  label: 'Koleksi',            type: 'item' },
+  statusGuna:      { pid: 'P5817', label: 'Status penggunaan',  type: 'item' },
+  aksara:          { pid: 'P282',  label: 'Aksara',             type: 'item' },
+  periode:         { pid: 'P2348', label: 'Periode',            type: 'item' },
+  memperingati:    { pid: 'P547',  label: 'Memperingati',       type: 'item' },
+  pencipta:        { pid: 'P170',  label: 'Pencipta',           type: 'item' },
+  pelukis:         { pid: 'P170',  label: 'Pelukis',            type: 'item' },
+  tinggi:          { pid: 'P2048', label: 'Tinggi',             type: 'quantity', unit: Q_METER, unitLabel: 'm' },
+  jumlahKamar:     { pid: 'P8733', label: 'Jumlah kamar',       type: 'quantity' },
+  operator:        { pid: 'P137',  label: 'Operator',           type: 'item' },
+  pengelola:       { pid: 'P137',  label: 'Pengelola',          type: 'item' },
+  penghuni:        { pid: 'P466',  label: 'Penghuni',           type: 'item' },
+  penghuniKlub:    { pid: 'P466',  label: 'Penghuni/klub',      type: 'item' },
+  luas:            { pid: 'P2046', label: 'Luas',               type: 'quantity', unit: Q_KM2, unitLabel: 'km²' },
+  ranjang:         { pid: 'P6801', label: 'Jumlah ranjang',     type: 'quantity' },
+  pelajar:         { pid: 'P2196', label: 'Jumlah pelajar',     type: 'quantity', suffix: 'orang' },
+  permukaan:       { pid: 'P765',  label: 'Permukaan lapangan', type: 'item' },
+  rektor:          { pid: 'P1037', label: 'Rektor/direktur',    type: 'item' },
+  iata:            { pid: 'P238',  label: 'Kode IATA',          type: 'string' },
+  icao:            { pid: 'P239',  label: 'Kode ICAO',          type: 'string' },
+  ketinggian:      { pid: 'P2044', label: 'Ketinggian',         type: 'quantity', unit: Q_METER, unitLabel: 'mdpl' },
+  jalur:           { pid: 'P81',   label: 'Jalur',              type: 'item' },
+  perairan:        { pid: 'P206',  label: 'Perairan',           type: 'item' },
+  perairanSungai:  { pid: 'P206',  label: 'Perairan/sungai',    type: 'item' },
+  iucn:            { pid: 'P814',  label: 'Kategori IUCN',      type: 'item' },
+  kedalaman:       { pid: 'P4511', label: 'Kedalaman',          type: 'quantity', unit: Q_METER, unitLabel: 'm' },
+  panjang:         { pid: 'P2043', label: 'Panjang',            type: 'quantity', unit: Q_METER, unitLabel: 'm' },
+  pegunungan:      { pid: 'P4552', label: 'Pegunungan',         type: 'item' },
+  prominensi:      { pid: 'P2660', label: 'Prominensi',         type: 'quantity', unit: Q_METER, unitLabel: 'm' },
+  bagianDari:      { pid: 'P361',  label: 'Bagian dari',        type: 'item' },
+  penduduk:        { pid: 'P1082', label: 'Jumlah penduduk',    type: 'quantity', suffix: 'jiwa' },
+  waktu:           { pid: 'P585',  label: 'Waktu',              type: 'time' },
+  magnitudo:       { pid: 'P2527', label: 'Magnitudo',          type: 'quantity' },
+  korban:          { pid: 'P1120', label: 'Korban jiwa',        type: 'quantity', suffix: 'jiwa' },
+  penyebab:        { pid: 'P828',  label: 'Penyebab',           type: 'item' },
+  mulai:           { pid: 'P580',  label: 'Mulai',              type: 'time' },
+  berakhir:        { pid: 'P582',  label: 'Berakhir',           type: 'time' },
+  peserta:         { pid: 'P710',  label: 'Peserta',            type: 'item' },
+  latar:           { pid: 'P840',  label: 'Latar tempat',       type: 'item' },
+  penulis:         { pid: 'P50',   label: 'Penulis',            type: 'item' },
+  genre:           { pid: 'P136',  label: 'Genre',              type: 'item' },
+  subjek:          { pid: 'P921',  label: 'Subjek',             type: 'item' },
+  kepalaDaerah:    { pid: 'P6',    label: 'Kepala daerah',      type: 'item' },
+  tempatLahir:     { pid: 'P19',   label: 'Tempat lahir',       type: 'item' },
+  tanggalLahir:    { pid: 'P569',  label: 'Tanggal lahir',      type: 'time' },
+  pekerjaan:       { pid: 'P106',  label: 'Pekerjaan',          type: 'item' },
+  tanggalWafat:    { pid: 'P570',  label: 'Tanggal wafat',      type: 'time' },
+  berasalDari:     { pid: 'P2341', label: 'Berasal dari',       type: 'item' },
+  penutur:         { pid: 'P1098', label: 'Jumlah penutur',     type: 'quantity', suffix: 'orang' },
+  statusUnesco:    { pid: 'P1999', label: 'Status UNESCO',      type: 'item' },
+  negaraAsal:      { pid: 'P495',  label: 'Negara asal',        type: 'item' },
+  caraBuat:        { pid: 'P2079', label: 'Cara pembuatan',     type: 'item' },
+  waktuPelaksanaan:{ pid: 'P837',  label: 'Waktu pelaksanaan',  type: 'item' },
+};
 
-  if (KB.includes(klaster)) {
-    sel += `(SAMPLE(?kapVal) AS ?kapasitas) (SAMPLE(?kondisiLabel) AS ?kondisi) (SAMPLE(?webVal) AS ?lamanResmi) (SAMPLE(?arsitekLabel) AS ?arsitek) (GROUP_CONCAT(DISTINCT ?fasilitasLabel; separator=", ") AS ?fasilitasList) (GROUP_CONCAT(DISTINCT ?gayaLabel; separator=", ") AS ?gayaList) `;
-    whr += `
-      OPTIONAL { ?site wdt:P1083 ?kapVal . }
-      OPTIONAL { ?site wdt:P5817 ?kondisiItem . ?kondisiItem rdfs:label ?kondisiLabel . FILTER(LANG(?kondisiLabel) = "id") }
-      OPTIONAL { ?site wdt:P856 ?webVal . }
-      OPTIONAL { ?site wdt:P84 ?arsitekItem . ?arsitekItem rdfs:label ?arsitekLabel . FILTER(LANG(?arsitekLabel) = "id") }
-      OPTIONAL { ?site wdt:P912 ?fasilitasItem . ?fasilitasItem rdfs:label ?fasilitasLabel . FILTER(LANG(?fasilitasLabel) = "id") }
-      OPTIONAL { ?site wdt:P149 ?gayaItem . ?gayaItem rdfs:label ?gayaLabel . FILTER(LANG(?gayaLabel) = "id") }
-    `;
-  }
+// Nama kategori harus sama persis dengan label di KATEGORI_DATA (app/utils/wikidata.py)
+const SKEMA_KATEGORI = (A => ({
+  // Umum
+  'Kabupaten dan kota':          [A.penduduk, A.luas, A.kepalaDaerah, A.didirikan, A.laman],
+  'Tempat lahir tokoh':          [A.tempatLahir, A.tanggalLahir, A.pekerjaan, A.tanggalWafat],
 
-  if (klaster === 'Kabupaten dan kota') {
-    sel += `(SAMPLE(?popData) AS ?populasi) (SAMPLE(?govData) AS ?kepalaDaerah) (SAMPLE(?webVal) AS ?lamanResmi) `;
-    whr += `
-      OPTIONAL { ?site wdt:P856 ?webVal . }
-      OPTIONAL {
-        ?site p:P1082 ?popStmt . ?popStmt ps:P1082 ?popVal .
-        OPTIONAL { ?popStmt pq:P585 ?popDate . }
-        BIND(CONCAT(STR(?popVal), "|", STR(YEAR(?popDate))) AS ?popData)
-      }
-      OPTIONAL {
-        ?site p:P6 ?govStmt . ?govStmt ps:P6 ?govItem .
-        ?govItem rdfs:label ?govLabel . FILTER(LANG(?govLabel) = "id")
-        OPTIONAL { ?govStmt pq:P580 ?govDate . }
-        OPTIONAL { ?govWiki schema:about ?govItem ; schema:isPartOf <https://id.wikipedia.org/> . }
-        BIND(CONCAT(STR(?govLabel), "|", STR(YEAR(?govDate)), "|", IF(BOUND(?govWiki), STR(?govWiki), "kosong")) AS ?govData)
-      }
-    `;
-  } else if (klaster === 'Stasiun kereta api') {
-    sel += `(GROUP_CONCAT(DISTINCT ?jalurLabel; separator=", ") AS ?jalurList) `;
-    whr += `OPTIONAL { ?site wdt:P81 ?jalurItem . ?jalurItem rdfs:label ?jalurLabel . FILTER(LANG(?jalurLabel) = "id") }`;
-  } else if (klaster === 'Museum') {
-    sel += `(SAMPLE(?koleksiData) AS ?jumlahKoleksi) (GROUP_CONCAT(DISTINCT ?spesialisasiLabel; separator=", ") AS ?spesialisasiList) `;
-    whr += `
-      OPTIONAL {
-        ?site p:P1436 ?koleksiStmt . ?koleksiStmt psv:P1436 ?koleksiNode .
-        ?koleksiNode wikibase:quantityAmount ?koleksiVal .
-        OPTIONAL { ?koleksiNode wikibase:quantityUnit ?koleksiUnitItem . ?koleksiUnitItem rdfs:label ?koleksiUnitLabel . FILTER(LANG(?koleksiUnitLabel) = "id") }
-        BIND(CONCAT(STR(?koleksiVal), "|", IF(BOUND(?koleksiUnitLabel), ?koleksiUnitLabel, "")) AS ?koleksiData)
-      }
-      OPTIONAL { ?site wdt:P101 ?spesialisasiItem . ?spesialisasiItem rdfs:label ?spesialisasiLabel . FILTER(LANG(?spesialisasiLabel) = "id") }
-    `;
-  }
+  // Budaya
+  'Bahasa':                      [A.berasalDari, A.penutur, A.aksara, A.statusUnesco],
+  'Budaya rakyat':               [A.lokasiObjek, A.negaraAsal, A.bagianDari],
+  'Hidangan':                    [A.lokasiObjek, A.bahan, A.caraBuat, A.negaraAsal],
+  'Pakaian':                     [A.lokasiObjek, A.bahan, A.negaraAsal],
+  'Ritual dan upacara':          [A.lokasiObjek, A.agama, A.waktuPelaksanaan],
+  'Tari dan pertunjukan':        [A.lokasiObjek, A.genre, A.negaraAsal],
 
-  if (['Prasasti','Situs arkeologi lainnya','Artefak'].includes(klaster)) {
-    sel += `(SAMPLE(?tglTemuData) AS ?tglTemu) (SAMPLE(?tempatTemuLabel) AS ?tempatTemu) `;
-    whr += `
-      OPTIONAL {
-        ?site p:P575 ?tglTemuStmt . ?tglTemuStmt psv:P575 ?tglTemuNode .
-        ?tglTemuNode wikibase:timeValue ?tglTemuVal ; wikibase:timePrecision ?tglTemuPrec .
-        BIND(CONCAT(STR(?tglTemuVal), "|", STR(?tglTemuPrec)) AS ?tglTemuData)
-      }
-      OPTIONAL { ?site wdt:P189 ?tempatTemuItem . ?tempatTemuItem rdfs:label ?tempatTemuLabel . FILTER(LANG(?tempatTemuLabel) = "id") }
-    `;
-  }
+  // Tempat ibadah
+  'Masjid':                      [A.lokasi, A.didirikan, A.kapasitas, A.gaya, A.arsitek],
+  'Gereja & katedral':           [A.lokasi, A.didirikan, A.denominasi, A.kapasitas, A.gaya],
+  'Kuil & candi':                [A.lokasi, A.didirikan, A.agama, A.gaya, A.warisan],
+  'Vihara & kelenteng':          [A.lokasi, A.didirikan, A.agama, A.kapasitas, A.gaya],
 
-  if (klaster === 'Situs arkeologi') {
-    sel += `(GROUP_CONCAT(DISTINCT ?agamaLabel; separator=", ") AS ?agamaList) `;
-    whr += `OPTIONAL { ?site wdt:P140 ?agamaItem . ?agamaItem rdfs:label ?agamaLabel . FILTER(LANG(?agamaLabel) = "id") }`;
-  }
+  // Media & museum
+  'Media massa':                 [A.tempatTerbit, A.tanggalTerbit, A.penerbit, A.bahasa, A.laman],
+  'Museum':                      [A.lokasi, A.didirikan, A.koleksiJumlah, A.pengunjung, A.laman],
 
-  if (['Pulau','Peristiwa lainnya','Perang & konflik','Bencana lainnya','Situs arkeologi','Prasasti','Artefak'].includes(klaster)) {
-    sel += `(SAMPLE(?bagianDariLabel) AS ?bagianDari) `;
-    whr += `OPTIONAL { ?site wdt:P361 ?bagianDariItem . ?bagianDariItem rdfs:label ?bagianDariLabel . FILTER(LANG(?bagianDariLabel) = "id") }`;
-  }
+  // Peninggalan sejarah
+  'Artefak':                     [A.lokasiObjek, A.tempatTemu, A.tanggalTemu, A.bahan, A.koleksi],
+  'Benteng dan bunker':          [A.lokasi, A.didirikan, A.statusGuna, A.warisan],
+  'Prasasti':                    [A.lokasiObjek, A.tanggalTemu, A.aksara, A.bahasa, A.bahan],
+  'Situs arkeologi lainnya':     [A.lokasi, A.periode, A.agama, A.tanggalTemu, A.warisan],
+  'Monumen, patung, & memorial': [A.lokasi, A.didirikan, A.memperingati, A.pencipta, A.bahan],
+  'Bangunan bersejarah lainnya': [A.lokasi, A.didirikan, A.gaya, A.arsitek, A.warisan],
+  'Bangunan secara umum dan struktur arsitektur':
+                                 [A.lokasi, A.didirikan, A.gaya, A.arsitek, A.tinggi],
 
-  if (['Prasasti','Lontar','Naskah','Media massa','Publikasi','Latar karya sastra','Lukisan'].includes(klaster)) {
-    sel += `(GROUP_CONCAT(DISTINCT ?bhsLabel; separator=", ") AS ?bahasaList) (GROUP_CONCAT(DISTINCT ?bentukLabel; separator=", ") AS ?bentukList) (GROUP_CONCAT(DISTINCT ?genreLabel; separator=", ") AS ?genreList) (GROUP_CONCAT(DISTINCT ?penulisLabel; separator=", ") AS ?penulisList) (GROUP_CONCAT(DISTINCT ?subjekLabel; separator=", ") AS ?subjekList) `;
-    whr += `
-      OPTIONAL { ?site wdt:P407 ?bhsItem . ?bhsItem rdfs:label ?bhsLabel . FILTER(LANG(?bhsLabel) = "id") }
-      OPTIONAL { ?site wdt:P7937 ?bentukItem . ?bentukItem rdfs:label ?bentukLabel . FILTER(LANG(?bentukLabel) = "id") }
-      OPTIONAL { ?site wdt:P136 ?genreItem . ?genreItem rdfs:label ?genreLabel . FILTER(LANG(?genreLabel) = "id") }
-      OPTIONAL { ?site wdt:P50 ?penulisItem . ?penulisItem rdfs:label ?penulisLabel . FILTER(LANG(?penulisLabel) = "id") }
-      OPTIONAL { ?site wdt:P921 ?subjekItem . ?subjekItem rdfs:label ?subjekLabel . FILTER(LANG(?subjekLabel) = "id") }
-    `;
-  }
+  // Bangunan/tempat
+  'Hotel dan resor':             [A.lokasi, A.didirikan, A.jumlahKamar, A.operator, A.laman],
+  'Istana':                      [A.lokasi, A.didirikan, A.gaya, A.penghuni, A.warisan],
+  'Kebun binatang & tanaman':    [A.lokasi, A.didirikan, A.luas, A.pengelola, A.laman],
+  'Objek wisata':                [A.lokasi, A.luas, A.pengelola, A.pengunjung, A.laman],
+  'Pasar dan mall':              [A.lokasi, A.didirikan, A.luas, A.pengelola, A.laman],
+  'Perpustakaan':                [A.lokasi, A.didirikan, A.koleksiJumlah, A.pengelola, A.laman],
+  'Ruang terbuka hijau':         [A.lokasi, A.didirikan, A.luas, A.pengelola],
+  'Rumah sakit':                 [A.lokasi, A.didirikan, A.ranjang, A.pengelola, A.laman],
+  'Sekolah':                     [A.lokasi, A.didirikan, A.pelajar, A.pengelola, A.laman],
+  'Stadion & lapangan olahraga': [A.lokasi, A.didirikan, A.kapasitas, A.penghuniKlub, A.permukaan],
+  'Universitas & kampus':        [A.lokasi, A.didirikan, A.pelajar, A.rektor, A.laman],
 
-  if (['Prasasti','Artefak','Lontar','Naskah','Lukisan'].includes(klaster)) {
-    sel += `(GROUP_CONCAT(DISTINCT ?kolektorLabel; separator=", ") AS ?kolektorList) `;
-    whr += `OPTIONAL { ?site wdt:P195 ?kolektorItem . ?kolektorItem rdfs:label ?kolektorLabel . FILTER(LANG(?kolektorLabel) = "id") }`;
-  }
+  // Transportasi
+  'Bandar udara':                [A.lokasi, A.iata, A.icao, A.operator, A.ketinggian],
+  'Pelabuhan':                   [A.lokasi, A.didirikan, A.operator, A.laman],
+  'Stasiun kereta api':          [A.lokasi, A.didirikan, A.jalur, A.operator, A.ketinggian],
+  'Terminal bus':                [A.lokasi, A.didirikan, A.operator],
 
-  if (['Prasasti','Situs arkeologi','Artefak','Lontar','Naskah','Lukisan'].includes(klaster)) {
-    sel += `(SAMPLE(?penciptaLabel) AS ?pencipta) (SAMPLE(?panjangData) AS ?panjang) (SAMPLE(?lebarData) AS ?lebar) (SAMPLE(?tinggiData) AS ?tinggi) (GROUP_CONCAT(DISTINCT ?bahanLabel; separator=", ") AS ?bahanList) (GROUP_CONCAT(DISTINCT ?aksaraLabel; separator=", ") AS ?aksaraList) `;
-    whr += `
-      OPTIONAL { ?site wdt:P170 ?penciptaItem . ?penciptaItem rdfs:label ?penciptaLabel . FILTER(LANG(?penciptaLabel) = "id") }
-      OPTIONAL {
-        ?site p:P2043 ?pjgStmt . ?pjgStmt psv:P2043 ?pjgNode .
-        ?pjgNode wikibase:quantityAmount ?pjgVal .
-        OPTIONAL { ?pjgNode wikibase:quantityUnit ?pjgUnitItem . ?pjgUnitItem rdfs:label ?pjgUnitLabel . FILTER(LANG(?pjgUnitLabel) = "id") }
-        BIND(CONCAT(STR(?pjgVal), "|", IF(BOUND(?pjgUnitLabel), ?pjgUnitLabel, "")) AS ?panjangData)
-      }
-      OPTIONAL {
-        ?site p:P2049 ?lbrStmt . ?lbrStmt psv:P2049 ?lbrNode .
-        ?lbrNode wikibase:quantityAmount ?lbrVal .
-        OPTIONAL { ?lbrNode wikibase:quantityUnit ?lbrUnitItem . ?lbrUnitItem rdfs:label ?lbrUnitLabel . FILTER(LANG(?lbrUnitLabel) = "id") }
-        BIND(CONCAT(STR(?lbrVal), "|", IF(BOUND(?lbrUnitLabel), ?lbrUnitLabel, "")) AS ?lebarData)
-      }
-      OPTIONAL {
-        ?site p:P2048 ?tgStmt . ?tgStmt psv:P2048 ?tgNode .
-        ?tgNode wikibase:quantityAmount ?tgVal .
-        OPTIONAL { ?tgNode wikibase:quantityUnit ?tgUnitItem . ?tgUnitItem rdfs:label ?tgUnitLabel . FILTER(LANG(?tgUnitLabel) = "id") }
-        BIND(CONCAT(STR(?tgVal), "|", IF(BOUND(?tgUnitLabel), ?tgUnitLabel, "")) AS ?tinggiData)
-      }
-      OPTIONAL { ?site wdt:P186 ?bahanItem . ?bahanItem rdfs:label ?bahanLabel . FILTER(LANG(?bahanLabel) = "id") }
-      OPTIONAL { ?site wdt:P282 ?aksaraItem . ?aksaraItem rdfs:label ?aksaraLabel . FILTER(LANG(?aksaraLabel) = "id") }
-    `;
-  }
+  // Bentang alam
+  'Air terjun':                  [A.lokasi, A.tinggi, A.perairan, A.ketinggian],
+  'Cagar alam':                  [A.lokasi, A.luas, A.ditetapkan, A.pengelola, A.iucn],
+  'Danau & kaldera':             [A.lokasi, A.luas, A.ketinggian, A.kedalaman],
+  'Gua':                         [A.lokasi, A.panjang, A.ketinggian],
+  'Gunung':                      [A.lokasi, A.ketinggian, A.pegunungan, A.prominensi],
+  'Pantai':                      [A.lokasi, A.panjang, A.perairan, A.pengelola],
+  'Pulau':                       [A.lokasi, A.luas, A.bagianDari, A.penduduk],
+  'Waduk, bendungan, & embung':  [A.lokasi, A.didirikan, A.perairanSungai, A.tinggi, A.luas],
 
-  if (klaster === 'Media massa') {
-    sel += `(GROUP_CONCAT(DISTINCT ?pemredLabel; separator=", ") AS ?pemredList) (GROUP_CONCAT(DISTINCT ?pendiriLabel; separator=", ") AS ?pendiriList) (SAMPLE(?penerbitLabel) AS ?penerbit) (SAMPLE(?berakhirData) AS ?berakhirPada) `;
-    whr += `
-      OPTIONAL { ?site wdt:P5769 ?pemredItem . ?pemredItem rdfs:label ?pemredLabel . FILTER(LANG(?pemredLabel) = "id") }
-      OPTIONAL { ?site wdt:P112 ?pendiriItem . ?pendiriItem rdfs:label ?pendiriLabel . FILTER(LANG(?pendiriLabel) = "id") }
-      OPTIONAL { ?site wdt:P123 ?penerbitItem . ?penerbitItem rdfs:label ?penerbitLabel . FILTER(LANG(?penerbitLabel) = "id") }
-      OPTIONAL {
-        ?site p:P582 ?berakhirStmt . ?berakhirStmt psv:P582 ?berakhirNode .
-        ?berakhirNode wikibase:timeValue ?berakhirVal ; wikibase:timePrecision ?berakhirPrec .
-        BIND(CONCAT(STR(?berakhirVal), "|", STR(?berakhirPrec)) AS ?berakhirData)
-      }
-    `;
-  } else if (klaster === 'Hidangan') {
-    sel += `(GROUP_CONCAT(DISTINCT ?bahanLabel; separator=", ") AS ?bahanList) (GROUP_CONCAT(DISTINCT ?caraLabel; separator=", ") AS ?caraList) (SAMPLE(?wikibooksUrl) AS ?wikibooks) `;
-    whr += `
-      OPTIONAL { ?site wdt:P186 ?bahanItem . ?bahanItem rdfs:label ?bahanLabel . FILTER(LANG(?bahanLabel) = "id") }
-      OPTIONAL { ?site wdt:P2079 ?caraItem . ?caraItem rdfs:label ?caraLabel . FILTER(LANG(?caraLabel) = "id") }
-      OPTIONAL { ?wikibooksUrl schema:about ?site ; schema:isPartOf <https://id.wikibooks.org/> . }
-    `;
-  } else if (klaster === 'Bahasa') {
-    sel += `(SAMPLE(?penuturData) AS ?penutur) `;
-    whr += `
-      OPTIONAL {
-        ?site p:P1098 ?penuturStmt . ?penuturStmt ps:P1098 ?penuturVal .
-        OPTIONAL { ?penuturStmt pq:P585 ?penuturDate . }
-        BIND(CONCAT(STR(?penuturVal), "|", STR(YEAR(?penuturDate))) AS ?penuturData)
-      }
-    `;
-  } else if (klaster === 'Tempat lahir tokoh') {
-    sel += `(SAMPLE(?wafatData) AS ?tglWafat) (GROUP_CONCAT(DISTINCT ?kerjaLabel; separator=", ") AS ?pekerjaanList) (GROUP_CONCAT(DISTINCT ?ahliLabel; separator=", ") AS ?spesialisasiList) (GROUP_CONCAT(DISTINCT ?koleksiKaryaLabel; separator=", ") AS ?koleksiKaryaList) `;
-    whr += `
-      OPTIONAL {
-        ?site p:P570 ?wafatStmt . ?wafatStmt psv:P570 ?wafatNode .
-        ?wafatNode wikibase:timeValue ?wafatVal ; wikibase:timePrecision ?wafatPrec .
-        BIND(CONCAT(STR(?wafatVal), "|", STR(?wafatPrec)) AS ?wafatData)
-      }
-      OPTIONAL { ?site wdt:P106 ?kerjaItem . ?kerjaItem rdfs:label ?kerjaLabel . FILTER(LANG(?kerjaLabel) = "id") }
-      OPTIONAL { ?site wdt:P101 ?ahliItem . ?ahliItem rdfs:label ?ahliLabel . FILTER(LANG(?ahliLabel) = "id") }
-      OPTIONAL { ?site wdt:P6379 ?koleksiKaryaItem . ?koleksiKaryaItem rdfs:label ?koleksiKaryaLabel . FILTER(LANG(?koleksiKaryaLabel) = "id") }
-    `;
-  } else if (klaster === 'Gunung') {
-    sel += `(SAMPLE(?gunungLabel) AS ?pegunungan) `;
-    whr += `OPTIONAL { ?site wdt:P4552 ?gunungItem . ?gunungItem rdfs:label ?gunungLabel . FILTER(LANG(?gunungLabel) = "id") }`;
-  }
+  // Peristiwa
+  'Gempa bumi dan tsunami':      [A.lokasiObjek, A.waktu, A.magnitudo, A.korban, A.kedalaman],
+  'Bencana lainnya':             [A.lokasiObjek, A.waktu, A.penyebab, A.korban],
+  'Perang & konflik':            [A.lokasiObjek, A.mulai, A.berakhir, A.peserta, A.korban],
+  'Peristiwa lainnya':           [A.lokasiObjek, A.waktu, A.bagianDari, A.peserta],
 
-  if (['Gempa bumi dan tsunami','Bencana lainnya','Peristiwa lainnya','Perang & konflik'].includes(klaster)) {
-    sel += `(SAMPLE(?korbanVal) AS ?korban) `;
-    whr += `OPTIONAL { ?site wdt:P1120 ?korbanVal . }`;
-  }
+  // Karya & literatur
+  'Latar karya sastra':          [A.latar, A.tanggalTerbit, A.penulis, A.bahasa, A.genre],
+  'Lukisan':                     [A.lokasiObjek, A.dibuat, A.pelukis, A.koleksi, A.bahan],
+  'Lontar':                      [A.lokasiObjek, A.bahasa, A.aksara, A.koleksi, A.subjek],
+  'Naskah':                      [A.lokasiObjek, A.penulis, A.bahasa, A.aksara, A.koleksi],
+  'Publikasi':                   [A.tempatTerbit, A.tanggalTerbit, A.penulis, A.penerbit, A.bahasa],
+}))(ATRIBUT);
 
-  return `${sel} WHERE { ${whr} BIND(SUBSTR(STR(?site), 32) AS ?siteQid) } GROUP BY ?siteQid`;
+// Dipakai untuk "Semua Jenis Objek", Q-ID sendiri, dan kategori yang belum punya skema
+const SKEMA_DEFAULT = [ATRIBUT.lokasi, ATRIBUT.didirikan];
+
+function skemaKategori(klasterNama) {
+  return SKEMA_KATEGORI[klasterNama] || SKEMA_DEFAULT;
 }
 
+// ---------------------------------------------------------------------------
+// DETAIL ATRIBUT (via wbgetentities — langsung dari Wikidata, tanpa jeda
+// sinkronisasi SPARQL, sehingga nilai yang baru disimpan langsung terlihat)
+// ---------------------------------------------------------------------------
+
+const UNIT_SIMBOL = {
+  Q11573: 'm', Q828224: 'km', Q174728: 'cm', Q174789: 'mm',
+  Q712226: 'km²', Q25343: 'm²', Q35852: 'ha',
+};
+
+async function _wbGet(params, signal) {
+  const url = new URL(WD_API);
+  Object.entries({ ...params, format: 'json', origin: '*' })
+    .forEach(([k, v]) => url.searchParams.append(k, v));
+  const resp = await fetch(url, { signal });
+  if (!resp.ok) throw new Error('Wikidata HTTP ' + resp.status);
+  return resp.json();
+}
+
+/** Label (id → en → mul → QID) untuk banyak QID sekaligus. */
+async function fetchLabels(qids, signal) {
+  const labels = {};
+  await Promise.all(chunkArray(qids, 50).map(async chunk => {
+    const data = await _wbGet({
+      action: 'wbgetentities', ids: chunk.join('|'), props: 'labels', languages: 'id|en|mul',
+    }, signal);
+    Object.entries(data.entities || {}).forEach(([id, e]) => {
+      labels[id] = e.labels?.id?.value || e.labels?.en?.value || e.labels?.mul?.value || id;
+    });
+  }));
+  return labels;
+}
+
+/** Klaim peringkat terbaik: preferred bila ada, selain itu normal. Deprecated dibuang. */
+function bestRankClaims(claims = []) {
+  const preferred = claims.filter(c => c.rank === 'preferred');
+  return preferred.length ? preferred : claims.filter(c => c.rank === 'normal');
+}
+
+function _itemId(v) {
+  return v?.id || (v?.['numeric-id'] ? `Q${v['numeric-id']}` : null);
+}
+
+function _unitQid(unitUrl) {
+  return unitUrl && unitUrl !== '1' ? unitUrl.split('/').pop() : null;
+}
+
+function _qualifierYear(claim, pid) {
+  const t = claim.qualifiers?.[pid]?.[0]?.datavalue?.value?.time;
+  return t ? t.replace(/^[+-]/, '').slice(0, 4) : null;
+}
+
+/** Format angka quantity + satuan + tahun (kualifikator P585) untuk tampilan. */
+function formatQuantity(claim, attr, labels) {
+  const v      = claim.mainsnak.datavalue.value;
+  const angka  = parseFloat(v.amount).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+  const unit   = _unitQid(v.unit);
+  const satuan = !unit ? (attr.suffix || '')
+    : unit === attr.unit && attr.unitLabel ? attr.unitLabel
+    : UNIT_SIMBOL[unit] || labels[unit] || '';
+  const tahun  = _qualifierYear(claim, 'P585');
+  return [angka, satuan].filter(Boolean).join(' ') + (tahun ? ` (${tahun})` : '');
+}
+
+/**
+ * Ambil nilai semua atribut skema kategori untuk satu butir.
+ * @returns {Promise<{tipe: string, values: Object<string,{text: string, url?: string}>, wikibooks: ?string}>}
+ *          values di-key dengan PID; atribut kosong tidak punya entri.
+ */
 async function fetchDetailProps(qid, klasterNama, signal) {
-  const q = buildDetailQuery(qid, klasterNama);
-  const rows = await sparqlWithRetry(q, signal);
-  if (!rows.length) return {};
-  const props = {};
-  const r = rows[0];
-  Object.keys(r).forEach(k => {
-    if (k !== 'siteQid' && r[k]?.value) props[k] = r[k].value;
+  const skema = skemaKategori(klasterNama);
+  const data = await _wbGet({
+    action: 'wbgetentities', ids: qid, props: 'claims|sitelinks/urls', sitefilter: 'idwikibooks',
+  }, signal);
+  const entity = data.entities?.[qid];
+  if (!entity) throw new Error('Butir tidak ditemukan');
+
+  const claims  = entity.claims || {};
+  const valueOf = pid => bestRankClaims(claims[pid]);
+
+  // Kumpulkan QID yang perlu label: P31, nilai item, dan satuan quantity
+  const ids = new Set();
+  valueOf('P31').forEach(c => { const id = _itemId(c.mainsnak.datavalue?.value); if (id) ids.add(id); });
+  skema.forEach(attr => valueOf(attr.pid).forEach(c => {
+    const v = c.mainsnak.datavalue?.value;
+    if (!v) return;
+    if (attr.type === 'item') { const id = _itemId(v); if (id) ids.add(id); }
+    if (attr.type === 'quantity') {
+      const u = _unitQid(v.unit);
+      if (u && !UNIT_SIMBOL[u] && !(u === attr.unit && attr.unitLabel)) ids.add(u);
+    }
+  }));
+  const labels = ids.size ? await fetchLabels([...ids], signal) : {};
+
+  const tipe = valueOf('P31')
+    .map(c => labels[_itemId(c.mainsnak.datavalue?.value)])
+    .filter(Boolean).join(', ');
+
+  const values = {};
+  skema.forEach(attr => {
+    const list = valueOf(attr.pid);
+    if (!list.length) return;
+
+    // "nilai tidak diketahui" / "tidak ada nilai" tetap dihitung terisi
+    const withValue = list.filter(c => c.mainsnak.snaktype === 'value');
+    if (!withValue.length) {
+      values[attr.pid] = { text: list[0].mainsnak.snaktype === 'novalue' ? 'tidak ada' : 'tidak diketahui' };
+      return;
+    }
+
+    if (attr.type === 'item') {
+      values[attr.pid] = {
+        text: withValue.map(c => labels[_itemId(c.mainsnak.datavalue.value)] || _itemId(c.mainsnak.datavalue.value)).join(', '),
+      };
+    } else if (attr.type === 'quantity') {
+      // Bila ada beberapa nilai (mis. penduduk per tahun), ambil yang terbaru
+      const latest = withValue.slice().sort((a, b) =>
+        (_qualifierYear(b, 'P585') || '').localeCompare(_qualifierYear(a, 'P585') || ''))[0];
+      values[attr.pid] = { text: formatQuantity(latest, attr, labels) };
+    } else if (attr.type === 'time') {
+      const v = withValue[0].mainsnak.datavalue.value;
+      values[attr.pid] = { text: formatDate(v.time, v.precision) || v.time };
+    } else if (attr.type === 'url') {
+      const url = withValue[0].mainsnak.datavalue.value;
+      values[attr.pid] = { text: url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''), url };
+    } else {
+      values[attr.pid] = { text: withValue.map(c => c.mainsnak.datavalue.value).join(', ') };
+    }
   });
-  return props;
+
+  return { tipe, values, wikibooks: entity.sitelinks?.idwikibooks?.url || null };
+}
+
+/** Saran butir Wikidata untuk input atribut bertipe item. */
+async function searchWikidataItems(term, signal) {
+  const data = await _wbGet({
+    action: 'wbsearchentities', search: term, language: 'id', uselang: 'id',
+    type: 'item', limit: 7,
+  }, signal);
+  return (data.search || []).map(s => ({ id: s.id, label: s.label || s.id, description: s.description || '' }));
 }

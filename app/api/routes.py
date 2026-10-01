@@ -1,5 +1,7 @@
 import json
+import re
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from functools import wraps
 import requests
 from flask import current_app, jsonify, request, session
@@ -132,12 +134,38 @@ def update_description(qid):
 
 
 # ---------------------------------------------------------------------------
-# Endpoint: tambah klaim baru ke butir Wikidata (quantity / url)
+# Endpoint: tambah klaim baru ke butir Wikidata
+# datatype: item | quantity | time | url | string
 # ---------------------------------------------------------------------------
+
+def _parse_time(val):
+    """'1945', '1945-08', atau '1945-08-17' → datavalue time Wikidata, atau None jika tidak valid."""
+    m = re.fullmatch(r'(\d{1,4})(?:-(\d{2})(?:-(\d{2}))?)?', val)
+    if not m:
+        return None
+    year = int(m.group(1))
+    month = int(m.group(2) or 0)
+    day = int(m.group(3) or 0)
+    if not (1 <= year <= 2100):
+        return None
+    try:
+        if day:
+            date(year, month, day)
+        elif month and not 1 <= month <= 12:
+            return None
+    except ValueError:
+        return None
+    precision = 11 if day else 10 if month else 9
+    return {
+        'time': f'+{year:04d}-{month:02d}-{day:02d}T00:00:00Z',
+        'timezone': 0, 'before': 0, 'after': 0,
+        'precision': precision,
+        'calendarmodel': 'http://www.wikidata.org/entity/Q1985727',
+    }
+
 
 @api.route('/item/<qid>/add-claim', methods=['POST'])
 def add_claim(qid):
-    import re as _re
     qid  = qid.upper()
     body = request.get_json(silent=True) or {}
 
@@ -146,36 +174,39 @@ def add_claim(qid):
     datatype = body.get('datatype', '').strip()
     unit_qid = body.get('unit', '').strip()
 
-    if not prop or not _re.match(r'^P\d+$', prop):
+    if not prop or not re.match(r'^P\d+$', prop):
         return jsonify({'error': 'Format property tidak valid'}), 400
     if not val:
         return jsonify({'error': 'Nilai tidak boleh kosong'}), 400
 
-    if datatype == 'quantity':
+    if datatype == 'item':
+        if not re.fullmatch(r'Q\d+', val.upper()):
+            return jsonify({'error': 'Nilai harus berupa Q-ID butir Wikidata'}), 400
+        wd_value = json.dumps({'entity-type': 'item', 'numeric-id': int(val[1:])})
+    elif datatype == 'quantity':
         try:
-            num = float(val)
-        except ValueError:
+            num = Decimal(val)
+            if not num.is_finite():
+                raise InvalidOperation
+        except InvalidOperation:
             return jsonify({'error': 'Nilai harus berupa angka'}), 400
-        amount = f'+{int(num)}' if num == int(num) else f'+{num}'
+        if unit_qid and not re.fullmatch(r'Q\d+', unit_qid):
+            return jsonify({'error': 'Satuan tidak valid'}), 400
         unit_url = f'http://www.wikidata.org/entity/{unit_qid}' if unit_qid else '1'
-        wd_value = json.dumps({'amount': amount, 'unit': unit_url})
+        wd_value = json.dumps({'amount': f'{num.normalize():+f}', 'unit': unit_url})
     elif datatype == 'url':
-        if not _re.match(r'^https?://', val):
+        if not re.match(r'^https?://', val):
             return jsonify({'error': 'URL harus diawali https:// atau http://'}), 400
         wd_value = json.dumps(val)
-    elif datatype == 'year':
-        try:
-            year = int(val)
-            if not (1 <= year <= 2100):
-                raise ValueError
-        except ValueError:
-            return jsonify({'error': 'Tahun tidak valid (1–2100)'}), 400
-        wd_value = json.dumps({
-            'time': f'+{year:04d}-01-01T00:00:00Z',
-            'timezone': 0, 'before': 0, 'after': 0,
-            'precision': 9,
-            'calendarmodel': 'http://www.wikidata.org/entity/Q1985727',
-        })
+    elif datatype == 'time':
+        time_value = _parse_time(val)
+        if not time_value:
+            return jsonify({'error': 'Tanggal tidak valid (format TTTT, TTTT-BB, atau TTTT-BB-HH; tahun 1–2100)'}), 400
+        wd_value = json.dumps(time_value)
+    elif datatype == 'string':
+        if len(val) > 400:
+            return jsonify({'error': 'Teks terlalu panjang (maks. 400 karakter)'}), 400
+        wd_value = json.dumps(val)
     else:
         return jsonify({'error': f'Tipe data "{datatype}" belum didukung'}), 400
 
