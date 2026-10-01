@@ -23,6 +23,24 @@ def _get_authed_session():
     )
 
 
+def _get_session():
+    """Kembalikan OAuth session jika login, atau plain requests.Session jika anonim."""
+    if 'oauth_token' in session:
+        return _get_authed_session()
+    return requests.Session()
+
+
+def _get_csrf_token(http_session, api_url):
+    ua = _ua()
+    resp = http_session.get(
+        api_url,
+        params={'action': 'query', 'meta': 'tokens', 'format': 'json'},
+        headers={'User-Agent': ua},
+        timeout=10,
+    )
+    return resp.json()['query']['tokens']['csrftoken']
+
+
 def _ua():
     return current_app.config.get('WIKIMEDIA_USER_AGENT', 'WikiJelajah/1.0')
 
@@ -64,7 +82,6 @@ def item_summary(qid):
 # ---------------------------------------------------------------------------
 
 @api.route('/item/<qid>/label', methods=['POST'])
-@login_required
 def update_label(qid):
     body = request.get_json(silent=True) or {}
     new_label = body.get('label', '').strip()
@@ -72,20 +89,17 @@ def update_label(qid):
         return jsonify({'error': 'Label tidak boleh kosong'}), 400
 
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
-    oauth = _get_authed_session()
+    http = _get_session()
+    csrf_token = _get_csrf_token(http, wikidata_api)
 
-    token_resp = oauth.get(wikidata_api, params={'action': 'query', 'meta': 'tokens', 'format': 'json'})
-    csrf_token = token_resp.json()['query']['tokens']['csrftoken']
-
-    edit_resp = oauth.post(wikidata_api, data={
+    result = http.post(wikidata_api, data={
         'action': 'wbsetlabel',
         'id': qid.upper(),
         'language': 'id',
         'value': new_label,
         'token': csrf_token,
         'format': 'json',
-    })
-    result = edit_resp.json()
+    }, headers={'User-Agent': _ua()}).json()
 
     if 'error' in result:
         return jsonify({'error': result['error'].get('info', 'Gagal menyimpan')}), 500
@@ -94,26 +108,22 @@ def update_label(qid):
 
 
 @api.route('/item/<qid>/description', methods=['POST'])
-@login_required
 def update_description(qid):
     body = request.get_json(silent=True) or {}
     new_desc = body.get('description', '').strip()
 
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
-    oauth = _get_authed_session()
+    http = _get_session()
+    csrf_token = _get_csrf_token(http, wikidata_api)
 
-    token_resp = oauth.get(wikidata_api, params={'action': 'query', 'meta': 'tokens', 'format': 'json'})
-    csrf_token = token_resp.json()['query']['tokens']['csrftoken']
-
-    edit_resp = oauth.post(wikidata_api, data={
+    result = http.post(wikidata_api, data={
         'action': 'wbsetdescription',
         'id': qid.upper(),
         'language': 'id',
         'value': new_desc,
         'token': csrf_token,
         'format': 'json',
-    })
-    result = edit_resp.json()
+    }, headers={'User-Agent': _ua()}).json()
 
     if 'error' in result:
         return jsonify({'error': result['error'].get('info', 'Gagal menyimpan')}), 500
@@ -126,7 +136,6 @@ def update_description(qid):
 # ---------------------------------------------------------------------------
 
 @api.route('/item/<qid>/add-claim', methods=['POST'])
-@login_required
 def add_claim(qid):
     import re as _re
     qid  = qid.upper()
@@ -171,21 +180,16 @@ def add_claim(qid):
         return jsonify({'error': f'Tipe data "{datatype}" belum didukung'}), 400
 
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
-    ua    = _ua()
-    oauth = _get_authed_session()
+    ua   = _ua()
+    http = _get_session()
 
     try:
-        tok = oauth.get(
-            wikidata_api,
-            params={'action': 'query', 'meta': 'tokens', 'format': 'json'},
-            headers={'User-Agent': ua},
-        ).json()
-        csrf = tok['query']['tokens']['csrftoken']
+        csrf = _get_csrf_token(http, wikidata_api)
     except Exception as e:
         return jsonify({'error': f'Gagal ambil token: {e}'}), 500
 
     try:
-        result = oauth.post(wikidata_api, data={
+        result = http.post(wikidata_api, data={
             'action':   'wbcreateclaim',
             'entity':   qid,
             'snaktype': 'value',
@@ -209,7 +213,6 @@ def add_claim(qid):
 # ---------------------------------------------------------------------------
 
 @api.route('/item/<qid>/set-image', methods=['POST'])
-@login_required
 def set_image(qid):
     qid = qid.upper()
     body = request.get_json(silent=True) or {}
@@ -222,21 +225,16 @@ def set_image(qid):
         filename = filename[5:]
 
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
-    ua = _ua()
-    oauth = _get_authed_session()
+    ua   = _ua()
+    http = _get_session()
 
     try:
-        tok = oauth.get(
-            wikidata_api,
-            params={'action': 'query', 'meta': 'tokens', 'format': 'json'},
-            headers={'User-Agent': ua},
-        ).json()
-        csrf_token = tok['query']['tokens']['csrftoken']
+        csrf_token = _get_csrf_token(http, wikidata_api)
     except Exception as e:
         return jsonify({'error': f'Gagal ambil token: {e}'}), 500
 
     try:
-        wd = oauth.post(
+        wd = http.post(
             wikidata_api,
             data={
                 'action':   'wbcreateclaim',

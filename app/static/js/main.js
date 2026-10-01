@@ -723,7 +723,6 @@ const _PROP_KAPASITAS_SET = new Set([
 const _PROP_ALAM_SET = new Set(['Gunung','Pulau','Air terjun','Danau & kaldera','Pantai','Gua']);
 
 function getEmptyEditableProps(klasterNama, existingProps, yearStr = null) {
-  if (!APP_USER) return [];
   const keys = [];
   if (_PROP_KAPASITAS_SET.has(klasterNama)) keys.push('kapasitas');
   if (_PROP_KB_SET.has(klasterNama)) {
