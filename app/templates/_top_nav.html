@@ -1,0 +1,61 @@
+{# =========================================================
+   TOP NAVIGATION BAR — dipakai semua halaman
+   Tamu: hanya tombol Masuk.
+   Login desktop: tautan halaman di samping profil; dropdown profil berisi
+   Profil Wikimedia & Keluar.
+   Login mobile: tautan halaman ikut masuk ke dropdown profil.
+   ========================================================= #}
+{% set nav_links = [
+  ('main.index', 'Jelajah'),
+  ('main.perkaya', 'Perkaya Data'),
+] %}
+<header id="top-nav">
+  <a href="{{ url_for('main.index') }}" class="top-nav-brand" title="Ke halaman utama">
+    <img src="{{ url_for('static', filename='img/logobaru.png') }}"
+         alt="" class="top-nav-logo">
+    <span class="top-nav-title">WikiJelajah</span>
+  </a>
+
+  <div class="top-nav-auth">
+    {% if user %}
+    <nav class="top-nav-links" aria-label="Halaman">
+      {% for endpoint, label in nav_links %}
+      <a href="{{ url_for(endpoint) }}"
+         class="top-nav-link{% if request.endpoint == endpoint %} active{% endif %}"
+         {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ label }}</a>
+      {% endfor %}
+    </nav>
+    <div class="top-nav-menu-wrap">
+      <button type="button" id="top-nav-menu-toggle" class="top-nav-user-link top-nav-menu-toggle"
+              aria-haspopup="true" aria-expanded="false" aria-controls="top-nav-menu">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
+        </svg>
+        <span class="top-nav-username">{{ user.username }}</span>
+        <svg class="top-nav-caret" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+          <path d="M7 10l5 5 5-5z"/>
+        </svg>
+      </button>
+      <div id="top-nav-menu" class="top-nav-menu hidden" role="menu">
+        {% for endpoint, label in nav_links %}
+        <a href="{{ url_for(endpoint) }}" role="menuitem"
+           class="top-nav-menu-item top-nav-menu-item--page{% if request.endpoint == endpoint %} active{% endif %}"
+           {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ label }}</a>
+        {% endfor %}
+        <a href="https://www.mediawiki.org/wiki/User:{{ user.username | urlencode }}" role="menuitem"
+           target="_blank" rel="noopener noreferrer"
+           class="top-nav-menu-item top-nav-menu-item--sep">Profil Wikimedia ↗</a>
+        <a href="{{ url_for('auth.logout') }}" role="menuitem"
+           class="top-nav-menu-item top-nav-menu-item--logout">Keluar</a>
+      </div>
+    </div>
+    {% else %}
+    <a href="{{ url_for('auth.login', next=request.full_path) }}" class="top-nav-btn top-nav-btn--login">
+      <svg class="wikimedia-w" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.5 14.5l-3-8h1.5l1.8 5.2 1.8-5.2h1.5l1.8 5.2 1.8-5.2H18l-3 8-2-5.5-2 5.5z"/>
+      </svg>
+      Masuk
+    </a>
+    {% endif %}
+  </div>
+</header>

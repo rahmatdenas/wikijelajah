@@ -172,3 +172,15 @@
 
   .detail-title { font-size: var(--text-base); }
 }
+
+/* Top nav di layar sempit: tautan halaman pindah ke dropdown profil */
+@media (max-width: 800px) {
+  .top-nav-links { display: none; }
+  .top-nav-menu .top-nav-menu-item--page { display: block; }
+  .top-nav-menu-item--sep { border-top: 1px solid var(--color-gray-200); }
+}
+
+/* Nama pengguna dipersingkat agar logo & judul tetap muat */
+@media (max-width: 480px) {
+  .top-nav-username { max-width: 110px; }
+}

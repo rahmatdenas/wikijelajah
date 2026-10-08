@@ -502,7 +502,7 @@ function extractFilename(url) {
 function formatDate(dateStr, precision) {
   if (!dateStr) return null;
   const clean = dateStr.replace(/^[+-]/, '');
-  const year  = clean.slice(0, 4);
+  const year  = String(parseInt(clean.slice(0, 4), 10));  // '0601' → '601'
   const month = parseInt(clean.slice(5, 7));
   const day   = parseInt(clean.slice(8, 10));
   const prec  = parseInt(precision) || 9;
@@ -765,26 +765,10 @@ function formatQuantity(claim, attr, labels) {
   return [angka, satuan].filter(Boolean).join(' ') + (tahun ? ` (${tahun})` : '');
 }
 
-/**
- * Ambil nilai semua atribut skema kategori untuk satu butir.
- * @returns {Promise<{tipe: string, values: Object<string,{text: string, url?: string}>, wikibooks: ?string}>}
- *          values di-key dengan PID; atribut kosong tidak punya entri.
- */
-async function fetchDetailProps(qid, klasterNama, signal) {
-  const skema = skemaKategori(klasterNama);
-  const data = await _wbGet({
-    action: 'wbgetentities', ids: qid, props: 'claims|sitelinks/urls', sitefilter: 'idwikibooks',
-  }, signal);
-  const entity = data.entities?.[qid];
-  if (!entity) throw new Error('Butir tidak ditemukan');
-
-  const claims  = entity.claims || {};
-  const valueOf = pid => bestRankClaims(claims[pid]);
-
-  // Kumpulkan QID yang perlu label: P31, nilai item, dan satuan quantity
+/** QID yang labelnya dibutuhkan untuk menampilkan nilai atribut skema (nilai item & satuan). */
+function attrLabelIds(claims, skema) {
   const ids = new Set();
-  valueOf('P31').forEach(c => { const id = _itemId(c.mainsnak.datavalue?.value); if (id) ids.add(id); });
-  skema.forEach(attr => valueOf(attr.pid).forEach(c => {
+  skema.forEach(attr => bestRankClaims(claims[attr.pid]).forEach(c => {
     const v = c.mainsnak.datavalue?.value;
     if (!v) return;
     if (attr.type === 'item') { const id = _itemId(v); if (id) ids.add(id); }
@@ -793,15 +777,17 @@ async function fetchDetailProps(qid, klasterNama, signal) {
       if (u && !UNIT_SIMBOL[u] && !(u === attr.unit && attr.unitLabel)) ids.add(u);
     }
   }));
-  const labels = ids.size ? await fetchLabels([...ids], signal) : {};
+  return ids;
+}
 
-  const tipe = valueOf('P31')
-    .map(c => labels[_itemId(c.mainsnak.datavalue?.value)])
-    .filter(Boolean).join(', ');
-
+/**
+ * Teks tampilan untuk setiap atribut skema yang terisi.
+ * @returns {Object<string,{text: string, url?: string}>} di-key dengan PID; atribut kosong tidak punya entri.
+ */
+function formatAttrValues(claims, skema, labels) {
   const values = {};
   skema.forEach(attr => {
-    const list = valueOf(attr.pid);
+    const list = bestRankClaims(claims[attr.pid]);
     if (!list.length) return;
 
     // "nilai tidak diketahui" / "tidak ada nilai" tetap dihitung terisi
@@ -830,8 +816,39 @@ async function fetchDetailProps(qid, klasterNama, signal) {
       values[attr.pid] = { text: withValue.map(c => c.mainsnak.datavalue.value).join(', ') };
     }
   });
+  return values;
+}
 
-  return { tipe, values, wikibooks: entity.sitelinks?.idwikibooks?.url || null };
+/**
+ * Ambil nilai semua atribut skema kategori untuk satu butir.
+ * @returns {Promise<{tipe: string, values: Object<string,{text: string, url?: string}>, wikibooks: ?string}>}
+ *          values di-key dengan PID; atribut kosong tidak punya entri.
+ */
+async function fetchDetailProps(qid, klasterNama, signal) {
+  const skema = skemaKategori(klasterNama);
+  const data = await _wbGet({
+    action: 'wbgetentities', ids: qid, props: 'claims|sitelinks/urls', sitefilter: 'idwikibooks',
+  }, signal);
+  const entity = data.entities?.[qid];
+  if (!entity) throw new Error('Butir tidak ditemukan');
+
+  const claims = entity.claims || {};
+  const p31    = bestRankClaims(claims.P31);
+
+  // Label untuk P31 + nilai item + satuan, diambil sekaligus
+  const ids = attrLabelIds(claims, skema);
+  p31.forEach(c => { const id = _itemId(c.mainsnak.datavalue?.value); if (id) ids.add(id); });
+  const labels = ids.size ? await fetchLabels([...ids], signal) : {};
+
+  const tipe = p31
+    .map(c => labels[_itemId(c.mainsnak.datavalue?.value)])
+    .filter(Boolean).join(', ');
+
+  return {
+    tipe,
+    values: formatAttrValues(claims, skema, labels),
+    wikibooks: entity.sitelinks?.idwikibooks?.url || null,
+  };
 }
 
 /** Saran butir Wikidata untuk input atribut bertipe item. */

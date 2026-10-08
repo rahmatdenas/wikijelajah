@@ -137,10 +137,11 @@
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js" crossorigin="anonymous"></script>
 <script src="https://unpkg.com/osmtogeojson@3.0.0-beta.5/osmtogeojson.js" crossorigin="anonymous"></script>
 
-{# Status login — dibaca main.js #}
+{# Status login — dibaca script halaman #}
 <script>const APP_USER = {{ user | tojson if user else 'null' }};</script>
 
-{# App JS — urutan penting: wikidata & map dulu, baru main #}
+{# App JS — urutan penting: ui, wikidata & map dulu, baru script halaman #}
+<script src="{{ url_for('static', filename='js/ui.js') }}"></script>
 <script src="{{ url_for('static', filename='js/wikidata.js') }}"></script>
 <script src="{{ url_for('static', filename='js/map.js') }}"></script>
 

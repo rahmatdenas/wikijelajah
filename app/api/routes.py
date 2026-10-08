@@ -1,12 +1,12 @@
 import json
 import re
 from datetime import date
-from decimal import Decimal, InvalidOperation
 from functools import wraps
 import requests
 from flask import current_app, jsonify, request, session
 from requests_oauthlib import OAuth2Session
 from . import api
+from ..utils.datavalue import DataValueError, build_value
 
 
 def login_required(f):
@@ -138,32 +138,6 @@ def update_description(qid):
 # datatype: item | quantity | time | url | string
 # ---------------------------------------------------------------------------
 
-def _parse_time(val):
-    """'1945', '1945-08', atau '1945-08-17' → datavalue time Wikidata, atau None jika tidak valid."""
-    m = re.fullmatch(r'(\d{1,4})(?:-(\d{2})(?:-(\d{2}))?)?', val)
-    if not m:
-        return None
-    year = int(m.group(1))
-    month = int(m.group(2) or 0)
-    day = int(m.group(3) or 0)
-    if not (1 <= year <= 2100):
-        return None
-    try:
-        if day:
-            date(year, month, day)
-        elif month and not 1 <= month <= 12:
-            return None
-    except ValueError:
-        return None
-    precision = 11 if day else 10 if month else 9
-    return {
-        'time': f'+{year:04d}-{month:02d}-{day:02d}T00:00:00Z',
-        'timezone': 0, 'before': 0, 'after': 0,
-        'precision': precision,
-        'calendarmodel': 'http://www.wikidata.org/entity/Q1985727',
-    }
-
-
 @api.route('/item/<qid>/add-claim', methods=['POST'])
 def add_claim(qid):
     qid  = qid.upper()
@@ -176,39 +150,10 @@ def add_claim(qid):
 
     if not prop or not re.match(r'^P\d+$', prop):
         return jsonify({'error': 'Format property tidak valid'}), 400
-    if not val:
-        return jsonify({'error': 'Nilai tidak boleh kosong'}), 400
-
-    if datatype == 'item':
-        if not re.fullmatch(r'Q\d+', val.upper()):
-            return jsonify({'error': 'Nilai harus berupa Q-ID butir Wikidata'}), 400
-        wd_value = json.dumps({'entity-type': 'item', 'numeric-id': int(val[1:])})
-    elif datatype == 'quantity':
-        try:
-            num = Decimal(val)
-            if not num.is_finite():
-                raise InvalidOperation
-        except InvalidOperation:
-            return jsonify({'error': 'Nilai harus berupa angka'}), 400
-        if unit_qid and not re.fullmatch(r'Q\d+', unit_qid):
-            return jsonify({'error': 'Satuan tidak valid'}), 400
-        unit_url = f'http://www.wikidata.org/entity/{unit_qid}' if unit_qid else '1'
-        wd_value = json.dumps({'amount': f'{num.normalize():+f}', 'unit': unit_url})
-    elif datatype == 'url':
-        if not re.match(r'^https?://', val):
-            return jsonify({'error': 'URL harus diawali https:// atau http://'}), 400
-        wd_value = json.dumps(val)
-    elif datatype == 'time':
-        time_value = _parse_time(val)
-        if not time_value:
-            return jsonify({'error': 'Tanggal tidak valid (format TTTT, TTTT-BB, atau TTTT-BB-HH; tahun 1–2100)'}), 400
-        wd_value = json.dumps(time_value)
-    elif datatype == 'string':
-        if len(val) > 400:
-            return jsonify({'error': 'Teks terlalu panjang (maks. 400 karakter)'}), 400
-        wd_value = json.dumps(val)
-    else:
-        return jsonify({'error': f'Tipe data "{datatype}" belum didukung'}), 400
+    try:
+        wd_value = build_value(datatype, val, unit_qid)
+    except DataValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
     ua   = _ua()
