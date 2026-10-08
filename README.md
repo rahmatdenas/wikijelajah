@@ -57,3 +57,7 @@ Buka browser di `http://localhost:5000` (atau port yang ditampilkan di terminal)
 - Edit label, deskripsi, dan properti langsung ke Wikidata (perlu login)
 - Upload foto ke Wikimedia Commons
 - Cache hasil pencarian di browser (sessionStorage)
+
+## Lisensi
+
+Dirilis di bawah [Lisensi MIT](LICENSE).
