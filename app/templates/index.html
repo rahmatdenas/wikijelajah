@@ -2,36 +2,7 @@
 
 {% block body %}
 
-{# =========================================================
-   TOP NAVIGATION BAR (di atas peta)
-   ========================================================= #}
-<header id="top-nav">
-  <div class="top-nav-brand">
-    <img src="{{ url_for('static', filename='img/logobaru.png') }}"
-         alt="WikiJelajah" class="top-nav-logo">
-    <span class="top-nav-title">WikiJelajah</span>
-  </div>
-  <div class="top-nav-auth">
-    {% if user %}
-    <a href="https://www.mediawiki.org/wiki/User:{{ user.username | urlencode }}"
-       target="_blank" rel="noopener noreferrer"
-       class="top-nav-user-link" title="Lihat profil Wikimedia">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-        <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
-      </svg>
-      <span class="top-nav-username">{{ user.username }}</span>
-    </a>
-    <a href="{{ url_for('auth.logout') }}" class="top-nav-btn">Keluar</a>
-    {% else %}
-    <a href="{{ url_for('auth.login') }}" class="top-nav-btn top-nav-btn--login">
-      <svg class="wikimedia-w" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.5 14.5l-3-8h1.5l1.8 5.2 1.8-5.2h1.5l1.8 5.2 1.8-5.2H18l-3 8-2-5.5-2 5.5z"/>
-      </svg>
-      Masuk dengan Wikimedia
-    </a>
-    {% endif %}
-  </div>
-</header>
+{% include '_top_nav.html' %}
 
 <div id="app-body">
 
@@ -144,6 +115,7 @@
         <button class="feature-btn loading" id="btn-jelajahi-gambar"  data-filter="image">Jelajahi Gambar</button>
         <button class="feature-btn loading" id="btn-semua-hasil"      data-filter="all">Semua Hasil</button>
       </div>
+      <!-- <a href="{{ url_for('main.perkaya') }}" id="btn-perkaya" class="perkaya-bridge">✨ Perkaya data ini dengan AI →</a> -->
     </div>
 
     <input type="search" id="search-input" class="search-input"
@@ -168,18 +140,14 @@
      SEKSI: TENTANG
      ------------------------------------------------------- #}
   <section id="panel-about" class="panel-section hidden">
-    <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/c/ca/Portal_Mosque_icon.svg/60px-Portal_Mosque_icon.svg.png"
-         alt="WikiSurau" style="float:right;margin:0 0 10px 10px;width:60px">
     <p>
-      WikiSurau merupakan program pendokumentasian bangunan bersejarah berupa masjid dan surau tua
-      di Sumatra Barat. Di Minangkabau, masjid merupakan syarat berdirinya suatu nagari (desa/kelurahan).
+      WikiJelajah adalah alat bantu untuk menjelajahi dan menyunting data tempat wisata di Indonesia
+      melalui Wikidata. Pengguna dapat mencari lokasi wisata, melihat detail informasinya, serta
+      menambah atau memperbarui data seperti label, deskripsi, gambar, dan atribut lainnya.
     </p>
     <p>
-      Banyak masjid dan surau tua di Sumatra Barat telah ditetapkan sebagai cagar budaya.
-      Namun, bangunannya dapat hancur bila terjadi gempa bumi yang sering melanda Sumatra Barat.
-    </p>
-    <p>
-      Aplikasi ini dikembangkan oleh Wikimedia Indonesia dan masih dalam tahap pengerjaan.
+      Data yang disunting melalui WikiJelajah langsung tersimpan ke Wikidata dan dapat dimanfaatkan
+      oleh seluruh proyek Wikimedia maupun aplikasi pihak ketiga yang menggunakan data terbuka.
     </p>
   </section>
 

@@ -1,4 +1,4 @@
-from flask import current_app, redirect, session, url_for
+from flask import current_app, redirect, request, session, url_for
 from requests import get as requests_get
 from . import auth
 
@@ -25,7 +25,11 @@ def login():
         'editcount': profile.get('editcount', 0),
     }
 
-    return redirect(url_for('main.index'))
+    # Kembali ke halaman asal; hanya path lokal agar tidak jadi open redirect
+    next_url = request.args.get('next', '')
+    if not next_url.startswith('/') or next_url.startswith(('//', '/\\')):
+        next_url = url_for('main.index')
+    return redirect(next_url)
 
 
 @auth.route('/logout')

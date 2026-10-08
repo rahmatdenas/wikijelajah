@@ -1,10 +1,12 @@
 import json
+import re
 from datetime import date
 from functools import wraps
 import requests
 from flask import current_app, jsonify, request, session
 from requests_oauthlib import OAuth2Session
 from . import api
+from ..utils.datavalue import DataValueError, build_value
 
 
 def login_required(f):
@@ -132,12 +134,12 @@ def update_description(qid):
 
 
 # ---------------------------------------------------------------------------
-# Endpoint: tambah klaim baru ke butir Wikidata (quantity / url)
+# Endpoint: tambah klaim baru ke butir Wikidata
+# datatype: item | quantity | time | url | string
 # ---------------------------------------------------------------------------
 
 @api.route('/item/<qid>/add-claim', methods=['POST'])
 def add_claim(qid):
-    import re as _re
     qid  = qid.upper()
     body = request.get_json(silent=True) or {}
 
@@ -146,38 +148,12 @@ def add_claim(qid):
     datatype = body.get('datatype', '').strip()
     unit_qid = body.get('unit', '').strip()
 
-    if not prop or not _re.match(r'^P\d+$', prop):
+    if not prop or not re.match(r'^P\d+$', prop):
         return jsonify({'error': 'Format property tidak valid'}), 400
-    if not val:
-        return jsonify({'error': 'Nilai tidak boleh kosong'}), 400
-
-    if datatype == 'quantity':
-        try:
-            num = float(val)
-        except ValueError:
-            return jsonify({'error': 'Nilai harus berupa angka'}), 400
-        amount = f'+{int(num)}' if num == int(num) else f'+{num}'
-        unit_url = f'http://www.wikidata.org/entity/{unit_qid}' if unit_qid else '1'
-        wd_value = json.dumps({'amount': amount, 'unit': unit_url})
-    elif datatype == 'url':
-        if not _re.match(r'^https?://', val):
-            return jsonify({'error': 'URL harus diawali https:// atau http://'}), 400
-        wd_value = json.dumps(val)
-    elif datatype == 'year':
-        try:
-            year = int(val)
-            if not (1 <= year <= 2100):
-                raise ValueError
-        except ValueError:
-            return jsonify({'error': 'Tahun tidak valid (1–2100)'}), 400
-        wd_value = json.dumps({
-            'time': f'+{year:04d}-01-01T00:00:00Z',
-            'timezone': 0, 'before': 0, 'after': 0,
-            'precision': 9,
-            'calendarmodel': 'http://www.wikidata.org/entity/Q1985727',
-        })
-    else:
-        return jsonify({'error': f'Tipe data "{datatype}" belum didukung'}), 400
+    try:
+        wd_value = build_value(datatype, val, unit_qid)
+    except DataValueError as e:
+        return jsonify({'error': str(e)}), 400
 
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
     ua   = _ua()

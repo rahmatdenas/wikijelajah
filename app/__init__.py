@@ -15,4 +15,7 @@ def create_app(config_name='default'):
     from .api import api as api_bp
     app.register_blueprint(api_bp, url_prefix='/api')
 
+    from .utils.enrich_store import close_db
+    app.teardown_appcontext(close_db)
+
     return app

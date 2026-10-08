@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block title %}Perkaya Data · {{ config.APP_NAME }}{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/perkaya.css') }}">
+{% endblock %}
+
+{% block body %}
+
+{% include '_top_nav.html' %}
+
+<main id="perkaya-page" class="perkaya-page">
+
+{% if not user %}
+  <section class="pk-login">
+    <h2>Perkaya Data dengan AI</h2>
+    <p>
+      Temukan nilai atribut Wikidata yang masih kosong dengan bantuan AI, periksa sumbernya,
+      lalu simpan ke Wikidata atas nama akun Anda. Masuk terlebih dahulu untuk memakai fitur ini.
+    </p>
+    <a href="{{ url_for('auth.login', next=request.full_path) }}" class="btn btn--primary">Masuk</a>
+  </section>
+{% else %}
+
+  {# ---------------- Pilihan data ---------------- #}
+  <section class="pk-toolbar">
+    <div class="pk-form">
+      <div class="form-group">
+        <label class="form-label" for="pk-wilayah-tipe">Wilayah</label>
+        <select id="pk-wilayah-tipe" class="form-select">
+          <option value="provinsi" selected>Provinsi di Indonesia</option>
+          <option value="all">Seluruh Indonesia</option>
+          <option value="luar_negeri">Luar Negeri</option>
+        </select>
+      </div>
+      <div class="form-group" id="pk-wadah-provinsi">
+        <label class="form-label" for="pk-provinsi">Provinsi</label>
+        <select id="pk-provinsi" class="form-select">
+          {% for value, label in wilayah_provinsi %}
+          <option value="{{ value }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group hidden" id="pk-wadah-negara">
+        <label class="form-label" for="pk-negara">Negara</label>
+        <select id="pk-negara" class="form-select">
+          {% for benua, negara_list in wilayah_luar_negeri.items() %}
+          <optgroup label="{{ benua|capitalize }}">
+            {% for value, label in negara_list %}
+            <option value="{{ value }}">{{ label }}</option>
+            {% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="form-group pk-form-kategori">
+        <label class="form-label" for="pk-kategori">Kategori</label>
+        <select id="pk-kategori" class="form-select">
+          <option disabled selected value="">— Pilih kategori —</option>
+          {% for group in kategori_data %}
+            {% if group.group %}<optgroup label="{{ group.group }}">{% endif %}
+            {% for value, label, attrs in group['items'] if value != 'custom' %}
+            <option value="{{ value }}"
+              {% for k, v in attrs.items() %}{{ k }}="{{ v }}" {% endfor %}>{{ label }}</option>
+            {% endfor %}
+            {% if group.group %}</optgroup>{% endif %}
+          {% endfor %}
+        </select>
+      </div>
+      <button id="pk-btn-muat" class="btn btn--primary pk-btn-muat">Muat data</button>
+    </div>
+    <button id="pk-btn-settings" class="btn btn--secondary pk-btn-settings" type="button">
+      ⚙ Pengaturan AI <span id="pk-provider-badge" class="pk-provider-badge"></span>
+    </button>
+  </section>
+
+  {# ---------------- Tab ---------------- #}
+  <nav class="pk-tabs" role="tablist">
+    <button class="pk-tab active" data-tab="kelengkapan" role="tab">Kelengkapan</button>
+    <button class="pk-tab" data-tab="validasi" role="tab">
+      Validasi <span id="pk-count-validasi" class="pk-count hidden">0</span>
+    </button>
+    <button class="pk-tab" data-tab="riwayat" role="tab">Riwayat</button>
+  </nav>
+
+  {# ---------------- Tab: Kelengkapan ---------------- #}
+  <section id="pk-tab-kelengkapan" class="pk-panel">
+    <div id="pk-empty" class="pk-empty">
+      <p>Pilih wilayah dan kategori, lalu klik <strong>Muat data</strong> untuk melihat atribut mana yang masih kosong.</p>
+    </div>
+    <div id="pk-loading" class="pk-empty hidden">
+      <div class="loader loader--small"></div>
+      <p id="pk-loading-text">Memuat…</p>
+    </div>
+
+    <div id="pk-matrix-wrap" class="hidden">
+      <div class="pk-summary">
+        <p id="pk-summary-text"></p>
+        <div class="pk-filters">
+          <label class="pk-check"><input type="checkbox" id="pk-only-incomplete" checked> Hanya yang belum lengkap</label>
+          <input type="search" id="pk-search" class="form-input pk-search" placeholder="Cari nama butir…">
+        </div>
+      </div>
+      <div class="pk-legend">
+        <span><span class="pk-legend-value">Nilai</span> sudah ada di Wikidata</span>
+        <span><b class="pk-cell-ico pk-ico--empty">○</b> kosong (klik untuk memilih)</span>
+        <span><b class="pk-cell-ico pk-ico--pending">◐</b> menunggu validasi</span>
+        <span><b class="pk-cell-ico pk-ico--notfound">–</b> AI tidak menemukan</span>
+        <span><b class="pk-cell-ico pk-ico--error">!</b> gagal</span>
+      </div>
+      <div class="pk-table-scroll">
+        <table id="pk-matrix" class="pk-matrix"></table>
+      </div>
+    </div>
+
+    <div id="pk-actionbar" class="pk-actionbar hidden">
+      <span id="pk-selected-text">0 sel dipilih</span>
+      <button id="pk-btn-clear" class="btn btn--secondary btn--sm" type="button">Kosongkan pilihan</button>
+      <span class="pk-actionbar-spacer"></span>
+      <span id="pk-progress" class="pk-progress hidden"></span>
+      <button id="pk-btn-stop" class="btn btn--secondary btn--sm hidden" type="button">Hentikan</button>
+      <button id="pk-btn-run" class="btn btn--primary btn--sm" type="button" disabled>✨ Cari dengan AI</button>
+    </div>
+  </section>
+
+  {# ---------------- Tab: Validasi ---------------- #}
+  <section id="pk-tab-validasi" class="pk-panel hidden">
+    <div class="pk-validasi">
+      <aside class="pk-queue">
+        <p class="pk-queue-head">Menunggu validasi</p>
+        <ol id="pk-queue-list" class="pk-queue-list"></ol>
+      </aside>
+      <article id="pk-card" class="pk-card">
+        <p class="pk-empty-text">Belum ada kandidat. Jalankan pencarian AI di tab Kelengkapan.</p>
+      </article>
+    </div>
+  </section>
+
+  {# ---------------- Tab: Riwayat ---------------- #}
+  <section id="pk-tab-riwayat" class="pk-panel hidden">
+    <div class="pk-table-scroll">
+      <table class="pk-history">
+        <thead>
+          <tr><th>Waktu</th><th>Butir</th><th>Atribut</th><th>Nilai</th><th>Status</th><th>Sumber</th></tr>
+        </thead>
+        <tbody id="pk-history-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+{% endif %}
+</main>
+
+{# ---------------- Modal: Pengaturan AI ---------------- #}
+<div id="pk-settings" class="upload-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pk-settings-title">
+  <div class="upload-modal-box">
+    <div class="upload-modal-header">
+      <h3 id="pk-settings-title">Pengaturan AI</h3>
+      <button class="upload-modal-close" id="pk-settings-close" aria-label="Tutup">&times;</button>
+    </div>
+    <div class="upload-modal-body">
+      <div class="form-group">
+        <label class="form-label" for="pk-set-provider">Penyedia yang dipakai</label>
+        <select id="pk-set-provider" class="form-select">
+          <option value="claude">Claude (Anthropic)</option>
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Gemini (Google)</option>
+          <option value="groq">Groq</option>
+        </select>
+      </div>
+      {% for key, label in [('claude', 'Claude'), ('openai', 'OpenAI'), ('gemini', 'Gemini'), ('groq', 'Groq')] %}
+      <fieldset class="pk-set-provider" data-provider="{{ key }}">
+        <legend>{{ label }}</legend>
+        <div class="form-group">
+          <label class="form-label" for="pk-set-key-{{ key }}">API key</label>
+          <input type="password" id="pk-set-key-{{ key }}" class="form-input" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="pk-set-model-{{ key }}">Model</label>
+          <input type="text" id="pk-set-model-{{ key }}" class="form-input" placeholder="{{ default_models[key] }}" spellcheck="false">
+          {% if key == 'groq' %}
+          <small class="upload-hint">
+            Hanya model Groq yang bisa mencari web yang dipakai. Bila model ini gagal, otomatis dicoba:
+            {{ groq_search_models | join(', ') }}. API key dari console.groq.com.
+          </small>
+          {% endif %}
+        </div>
+      </fieldset>
+      {% endfor %}
+      <p class="upload-hint">
+        API key hanya disimpan di browser ini dan dikirim ke server WikiJelajah per pencarian
+        untuk diteruskan ke penyedia AI; server tidak menyimpannya. Biaya pemakaian ditanggung akun API Anda.
+      </p>
+    </div>
+    <div class="upload-modal-footer">
+      <button class="btn btn--secondary" id="pk-settings-cancel">Batal</button>
+      <button class="btn btn--primary" id="pk-settings-save">Simpan</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>const PK_DEFAULT_MODELS = {{ default_models | tojson }};</script>
+<script src="{{ url_for('static', filename='js/perkaya.js') }}"></script>
+{% endblock %}

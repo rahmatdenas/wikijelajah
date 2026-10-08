@@ -4,18 +4,39 @@
    map.js — Lapisan peta Leaflet. Tidak tahu soal state app atau DOM panel.
    ========================================================================== */
 
-const MAP_ICON = L.divIcon({
-  className: '',
-  html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-14 -13 412 538" width="28" height="38">
-    <ellipse cx="192" cy="510" rx="60" ry="15" fill="rgba(0,0,0,0.35)"/>
-    <path fill="var(--color-primary,#7b0d0c)" fill-rule="evenodd"
-      d="M172.3 501.7C27 291 0 269.4 0 192 0 86 86 0 192 0s192 86 192 192c0 77.4-27 99-172.3 309.7-9.5 13.8-29.9 13.8-39.5 0z
-         M192,132 a60,60 0 1,0 0,120 a60,60 0 1,0 0,-120z"/>
-  </svg>`,
-  iconSize: [28, 38],
-  iconAnchor: [14, 37],
-  popupAnchor: [0, -36],
-});
+// Warna marker sesuai kondisi butir. Tambah kondisi baru di sini + di mapMarkerStatus().
+const MARKER_WARNA = {
+  default: { fill: 'var(--color-primary,#7b0d0c)', stroke: 'none' },
+  tanpaFoto: { fill: '#f5b800', stroke: '#8a6500' },
+};
+
+function _buildIcon({ fill, stroke }) {
+  return L.divIcon({
+    className: '',
+    html: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-14 -13 412 538" width="28" height="38">
+      <ellipse cx="192" cy="510" rx="60" ry="15" fill="rgba(0,0,0,0.35)"/>
+      <path fill="${fill}" stroke="${stroke}" stroke-width="18" fill-rule="evenodd"
+        d="M172.3 501.7C27 291 0 269.4 0 192 0 86 86 0 192 0s192 86 192 192c0 77.4-27 99-172.3 309.7-9.5 13.8-29.9 13.8-39.5 0z
+           M192,132 a60,60 0 1,0 0,120 a60,60 0 1,0 0,-120z"/>
+    </svg>`,
+    iconSize: [28, 38],
+    iconAnchor: [14, 37],
+    popupAnchor: [0, -36],
+  });
+}
+
+const MAP_ICONS = Object.fromEntries(
+  Object.entries(MARKER_WARNA).map(([status, warna]) => [status, _buildIcon(warna)])
+);
+
+/**
+ * Status marker dari record. imageFilename: undefined = media belum dimuat
+ * (tetap warna default), null = sudah dimuat dan tidak ada foto.
+ */
+function mapMarkerStatus(record) {
+  if (record.imageFilename === null) return 'tanpaFoto';
+  return 'default';
+}
 
 let _map = null;
 let _cluster = null;
@@ -74,6 +95,17 @@ function mapInit(onMarkerClick) {
   };
   logo.addTo(_map);
 
+  // Keterangan warna marker
+  const legenda = L.control({ position: 'topright' });
+  legenda.onAdd = () => {
+    const el = L.DomUtil.create('div', 'map-legend');
+    el.innerHTML = `
+      <span class="map-legend-item"><i style="background:${MARKER_WARNA.default.fill}"></i>Ada foto</span>
+      <span class="map-legend-item"><i style="background:${MARKER_WARNA.tanpaFoto.fill}"></i>Belum ada foto</span>`;
+    return el;
+  };
+  legenda.addTo(_map);
+
   // Cluster
   _cluster = L.markerClusterGroup({
     maxClusterRadius: zoom => zoom <= 15 ? 50 : zoom === 16 ? 35 : zoom === 17 ? 20 : 10,
@@ -87,7 +119,7 @@ function mapInit(onMarkerClick) {
     const isSamePoint = bounds.getSouthWest().equals(bounds.getNorthEast());
     if (_map.getZoom() >= 18 || isSamePoint) {
       c.getChildCount() > 60
-        ? appShowDialog(`Terdapat <b>${c.getChildCount()} item</b> di satu titik. Persempit wilayah pencarian.`, 'alert', 'Titik Padat')
+        ? appShowDialog(`Terdapat <b>${c.getChildCount()} item</b> di satu titik. Silahkan lihat data di halaman hasil.`, 'alert', 'Titik Padat')
         : c.spiderfy();
     } else {
       _map.fitBounds(bounds);
@@ -112,7 +144,7 @@ function mapClear() {
 
 function mapBuildMarker(record) {
   if (!record.lat || !record.lon) return null;
-  const marker = L.marker([record.lat, record.lon], { icon: MAP_ICON });
+  const marker = L.marker([record.lat, record.lon], { icon: MAP_ICONS[mapMarkerStatus(record)] });
   const popup  = marker.bindPopup(record.title || record.id, {
     closeButton: true,
     maxWidth: 260,
@@ -122,6 +154,13 @@ function mapBuildMarker(record) {
   record.marker = marker;
   record.popup  = popup;
   return marker;
+}
+
+/** Perbarui warna marker setelah data record berubah (mis. media selesai dimuat, foto diupload). */
+function mapRefreshMarkerIcon(record) {
+  if (!record?.marker) return;
+  const icon = MAP_ICONS[mapMarkerStatus(record)];
+  if (record.marker.options.icon !== icon) record.marker.setIcon(icon);
 }
 
 function mapAddMarkers(markers) {

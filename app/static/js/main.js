@@ -26,8 +26,6 @@ let _listBuilt = false;
 // ---------------------------------------------------------------------------
 // DOM REFERENCES
 // ---------------------------------------------------------------------------
-const $ = id => document.getElementById(id);
-
 const DOM = {
   panel: null,
   sections: {},
@@ -165,7 +163,7 @@ function setLoadingStatus(text) {
 const _CACHE_TTL = 30 * 60 * 1000;
 
 function _cacheKey(p) {
-  return `wj:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
+  return `wj2:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
 }
 
 function _loadCache(key) {
@@ -180,10 +178,11 @@ function _loadCache(key) {
 
 function _saveCache(key, records, sortedIds) {
   try {
-    // Leaflet marker/popup tidak bisa di-serialize — strip dulu
+    // Leaflet marker/popup tidak bisa di-serialize — strip dulu.
+    // _detail juga dibuang agar detail selalu diambil segar (bisa sudah diedit).
     const clean = {};
     for (const [qid, r] of Object.entries(records)) {
-      const { marker, popup, ...rest } = r;
+      const { marker, popup, _detail, ...rest } = r;
       clean[qid] = rest;
     }
     sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), records: clean, sortedIds }));
@@ -247,7 +246,7 @@ async function startSearch() {
   if (cached) {
     State.records     = cached.records;
     State.sortedIds   = cached.sortedIds;
-    State.mediaLoaded = true;
+    setMediaReady();
     finishBuildResults();
     const markers = Object.values(State.records).map(r => mapBuildMarker(r)).filter(Boolean);
     mapAddMarkers(markers);
@@ -337,16 +336,24 @@ function resetHasilUI() {
   State.filter = { wilayah: 'all', mediaOnly: null, search: '' };
 }
 
+// Data gambar/artikel tersedia → aktifkan tombol Jelajahi Artikel/Gambar
+function setMediaReady() {
+  State.mediaLoaded = true;
+  DOM.btnArtikel?.classList.remove('loading');
+  DOM.btnGambar?.classList.remove('loading');
+  DOM.btnSemua?.classList.remove('loading');
+}
+
 async function loadMediaBackground(qids, signal, onComplete) {
   try {
     const media = await fetchMedia(qids.map(q => `wd:${q}`), signal);
     Object.entries(media).forEach(([qid, m]) => {
-      if (State.records[qid]) Object.assign(State.records[qid], m);
+      const r = State.records[qid];
+      if (!r) return;
+      Object.assign(r, m);
+      mapRefreshMarkerIcon(r);
     });
-    State.mediaLoaded = true;
-    DOM.btnArtikel?.classList.remove('loading');
-    DOM.btnGambar?.classList.remove('loading');
-    DOM.btnSemua?.classList.remove('loading');
+    setMediaReady();
     onComplete?.();
   } catch (e) {
     if (e.name !== 'AbortError') console.warn('Media load failed:', e);
@@ -583,14 +590,6 @@ function renderDetail(qid) {
          <a href="${createWikiUrl}" target="_blank" rel="noopener" class="detail-no-article-link">Tambahkan!</a>
        </p>`;
 
-  const detailItems = [
-    r.lokLabel && r.lokLabel !== r.provLabel ? ['Lokasi', r.lokLabel] : null,
-    r.provLabel  ? ['Wilayah', r.provLabel] : null,
-    r.yearStr    ? ['Didirikan', r.yearStr]  : null,
-  ].filter(Boolean)
-   .map(([k, v]) => `<li><span class="detail-info-key">${escHtml(k)}:</span> ${escHtml(v)}</li>`)
-   .join('');
-
   el.innerHTML = `
     <div class="detail-panel">
 
@@ -624,7 +623,6 @@ function renderDetail(qid) {
       <hr class="detail-hr">
 
       ${kategoriNama ? `<p class="detail-kategori">${escHtml(kategoriNama)}</p>` : ''}
-      ${detailItems ? `<ul class="detail-info-list">${detailItems}</ul>` : ''}
 
       <div id="detail-dynprops-${escHtml(qid)}">
         <p class="detail-excerpt-loading">Memuat detail…</p>
@@ -680,257 +678,193 @@ function renderDetail(qid) {
 }
 
 // ---------------------------------------------------------------------------
-// DETAIL PROPS DINAMIS (Query 6)
+// DETAIL ATRIBUT PER KATEGORI (skema: SKEMA_KATEGORI di wikidata.js)
 // ---------------------------------------------------------------------------
-function formatWikidataDate(dateString, precision) {
-  if (!dateString) return null;
-  const clean   = dateString.replace(/^[+-]/, '');
-  const yearStr = clean.substring(0, 4);
-  const month   = parseInt(clean.substring(5, 7));
-  const day     = parseInt(clean.substring(8, 10));
-  const yearNum = parseInt(yearStr);
-  const bulan   = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
-  const prec    = parseInt(precision) || 9;
-  if (prec === 11) return `${day} ${bulan[month]} ${yearStr}`;
-  if (prec === 10) return `${bulan[month]} ${yearStr}`;
-  if (prec === 9)  return yearStr;
-  if (prec === 8)  return `${yearStr}-an`;
-  if (prec === 7)  return `abad ke-${Math.ceil(yearNum / 100)}`;
-  return yearStr;
-}
-
-// Properti yang bisa ditambah inline (hanya tipe sederhana: quantity & url)
-const PROP_EDITABLE = {
-  kapasitas:  { pid: 'P1083', datatype: 'quantity', unit: '',       label: 'Kapasitas',         placeholder: 'Contoh: 1000' },
-  ketinggian: { pid: 'P2044', datatype: 'quantity', unit: 'Q11573', label: 'Ketinggian (mdpl)',  placeholder: 'Contoh: 500' },
-  lamanResmi: { pid: 'P856',  datatype: 'url',      unit: '',       label: 'Laman resmi',        placeholder: 'https://...' },
-  didirikan:  { pid: 'P571',  datatype: 'year',     unit: '',       label: 'Didirikan',          placeholder: 'Contoh: 1945' },
+const INPUT_PLACEHOLDER = {
+  item:     'Ketik untuk mencari…',
+  quantity: 'Contoh: 1000',
+  time:     'Contoh: 1945 atau 1945-08-17',
+  url:      'https://...',
+  string:   '',
 };
 
-const _PROP_KB_SET = new Set(['Masjid','Bangunan bersejarah','Gereja & katedral','Vihara & kelenteng',
-  'Rumah sakit','Sekolah','Universitas & kampus','Perpustakaan','Istana','Bandar udara',
-  'Terminal bus','Stadion & lapangan olahraga','Kuil & candi','Benteng dan bunker',
-  'Bangunan secara umum dan struktur arsitektur','Pasar dan mall','Hotel dan resor',
-  'Monumen, patung, & memorial','Museum','Stasiun kereta api']);
-
-// Hanya kategori yang memang relevan punya kapasitas (orang/penumpang)
-const _PROP_KAPASITAS_SET = new Set([
-  'Masjid','Gereja & katedral','Vihara & kelenteng','Rumah sakit',
-  'Sekolah','Universitas & kampus','Bandar udara','Terminal bus',
-  'Stadion & lapangan olahraga','Hotel dan resor',
-]);
-
-const _PROP_ALAM_SET = new Set(['Gunung','Pulau','Air terjun','Danau & kaldera','Pantai','Gua']);
-
-function getEmptyEditableProps(klasterNama, existingProps, yearStr = null) {
-  const keys = [];
-  if (_PROP_KAPASITAS_SET.has(klasterNama)) keys.push('kapasitas');
-  if (_PROP_KB_SET.has(klasterNama)) {
-    keys.push('lamanResmi');
-    if (!yearStr) keys.push('didirikan');
-  }
-  if (_PROP_ALAM_SET.has(klasterNama)) keys.push('ketinggian');
-  return keys.filter(k => !existingProps[k] && PROP_EDITABLE[k]);
-}
-
-function renderDynPropsHtml(qid, props, klasterNama = '') {
-  const label = {
-    tipeList:'Tipe/Jenis', ketinggian:'Ketinggian', luas:'Luas',
-    kapasitas:'Kapasitas', kondisi:'Kondisi', lamanResmi:'Laman resmi', didirikan:'Didirikan',
-    fasilitasList:'Fasilitas', arsitek:'Arsitek', gayaList:'Gaya arsitektur',
-    populasi:'Jumlah penduduk', kepalaDaerah:'Kepala daerah',
-    jalurList:'Jalur penghubung', jumlahKoleksi:'Jumlah koleksi',
-    spesialisasiList:'Spesialisasi', tglTemu:'Tanggal penemuan',
-    tempatTemu:'Lokasi penemuan', bahasaList:'Bahasa', bentukList:'Bentuk karya',
-    penulisList:'Penulis/pencipta', subjekList:'Subjek utama',
-    kolektorList:'Koleksi dari', pemredList:'Pimpinan redaksi',
-    pendiriList:'Pendiri', penerbit:'Penerbit', bahanList:'Bahan utama',
-    caraList:'Cara pembuatan', penutur:'Jumlah penutur', tglWafat:'Wafat',
-    pekerjaanList:'Pekerjaan', pegunungan:'Bagian dari pegunungan',
-    korban:'Korban jiwa', agamaList:'Agama', bagianDari:'Bagian dari',
-    berakhirPada:'Berhenti terbit', pencipta:'Pencipta', genreList:'Genre',
-    panjang:'Panjang', lebar:'Lebar', tinggi:'Tinggi',
-    aksaraList:'Sistem penulisan', koleksiKaryaList:'Tempat koleksi karya',
-  };
-
-  let wikibooksUrl = null;
-  if (props.wikibooks) { wikibooksUrl = props.wikibooks; delete props.wikibooks; }
-
+function renderDynPropsHtml(qid, detail, klasterNama = '') {
+  const r    = State.records[qid];
+  const row  = (key, valHtml) =>
+    `<li><span class="detail-info-key">${escHtml(key)}:</span> ${valHtml}</li>`;
   const items = [];
-  for (const key of Object.keys(props)) {
-    const raw   = props[key];
-    const title = label[key] || key;
-    let   val   = raw;
 
-    if (key === 'populasi' || key === 'penutur') {
-      const [angka, tahun] = raw.split('|');
-      const rapi = parseInt(angka).toLocaleString('id-ID');
-      val = tahun && tahun !== 'null' ? `${rapi} jiwa (${tahun})` : `${rapi} jiwa`;
-    } else if (key === 'kepalaDaerah') {
-      const [nama, tahun, wikiUrl] = raw.split('|');
-      const link = wikiUrl && wikiUrl !== 'kosong'
-        ? `<a href="${escHtml(wikiUrl)}" target="_blank" rel="noopener">${escHtml(nama)}</a>`
-        : escHtml(nama);
-      val = tahun && tahun !== 'null' ? `${link} (sejak ${tahun})` : link;
-    } else if (key === 'luas') {
-      const [angka, satuan, bagian] = raw.split('|');
-      const rapi = parseFloat(angka).toLocaleString('id-ID');
-      const teks = satuan ? `${rapi} ${satuan}` : rapi;
-      val = bagian ? `${teks} (untuk ${bagian})` : teks;
-    } else if (key === 'jumlahKoleksi') {
-      const [angka, satuan] = raw.split('|');
-      const rapi = parseInt(angka).toLocaleString('id-ID');
-      val = satuan ? `${rapi} ${satuan}` : rapi;
-    } else if (key === 'kapasitas' || key === 'korban') {
-      val = parseInt(raw).toLocaleString('id-ID');
-    } else if (key === 'panjang' || key === 'lebar' || key === 'tinggi') {
-      const [angka, satuan] = raw.split('|');
-      const rapi = parseFloat(angka).toLocaleString('id-ID');
-      val = satuan ? `${rapi} ${satuan}` : rapi;
-    } else if (key === 'ketinggian') {
-      val = parseInt(raw).toLocaleString('id-ID') + ' mdpl';
-    } else if (key === 'lamanResmi') {
-      const display = raw.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
-      val = `<a href="${escHtml(raw)}" target="_blank" rel="noopener" class="break-all">${escHtml(display)}</a>`;
-    } else if (key === 'tglTemu' || key === 'tglWafat' || key === 'berakhirPada') {
-      const [waktu, prec] = raw.split('|');
-      val = formatWikidataDate(waktu, prec) || raw;
-    } else if (key === 'bahanList' || key === 'caraList') {
-      val = escHtml(raw.toLowerCase());
-    } else if (key === 'bahasaList') {
-      val = escHtml(raw.replace(/\bbahasa\s+/gi, ''));
-    } else if (key === 'tipeList') {
-      val = escHtml(raw.split(', ').map(k => k.charAt(0).toUpperCase() + k.slice(1)).join(', '));
-    } else {
-      val = escHtml(raw);
-    }
-
-    items.push(`<li><span class="detail-info-key">${escHtml(title)}:</span> ${val}</li>`);
+  if (r?.provLabel) items.push(row('Wilayah', escHtml(r.provLabel)));
+  if (detail.tipe) {
+    const tipe = detail.tipe.split(', ').map(k => k.charAt(0).toUpperCase() + k.slice(1)).join(', ');
+    items.push(row('Tipe/Jenis', escHtml(tipe)));
   }
 
-  // Baris kosong yang bisa ditambah inline
-  const yearStr = State.records[qid]?.yearStr || null;
-  getEmptyEditableProps(klasterNama, props, yearStr).forEach(key => {
-    const m     = PROP_EDITABLE[key];
-    const itype = m.datatype === 'url' ? 'url' : 'number';
-    const extraAttr = m.datatype === 'year' ? ' min="1" max="2100" step="1"' : '';
-    items.push(`<li class="detail-prop-empty-row"
-        data-propkey="${key}" data-pid="${m.pid}"
-        data-dtype="${m.datatype}" data-unit="${m.unit}">
-      <span class="detail-info-key">${escHtml(m.label)}:</span>
-      <span class="prop-empty-badge">–</span>
-      <button class="js-prop-pencil prop-pencil-btn" title="Tambah nilai" type="button">✏</button>
-      <span class="prop-edit-inline hidden">
-        <input type="${itype}" class="prop-edit-input"
-               placeholder="${escHtml(m.placeholder || '')}" step="any"${extraAttr}>
-        <button class="prop-save-btn" type="button" title="Simpan">✓</button>
-        <button class="prop-cancel-btn" type="button" title="Batal">✕</button>
-      </span>
-    </li>`);
+  skemaKategori(klasterNama).forEach(attr => {
+    const v = detail.values[attr.pid];
+    if (!v) { items.push(renderEmptyPropRow(attr)); return; }
+    const val = v.url && /^https?:\/\//i.test(v.url)
+      ? `<a href="${escHtml(v.url)}" target="_blank" rel="noopener" class="break-all">${escHtml(v.text)}</a>`
+      : escHtml(v.text);
+    items.push(row(attr.label, val));
   });
 
-  let html = items.length
-    ? `<ul class="detail-info-list detail-info-list--dyn">${items.join('')}</ul>`
-    : '';
+  let html = `<ul class="detail-info-list detail-info-list--dyn">${items.join('')}</ul>`;
 
-  if (wikibooksUrl) {
-    html += `<p class="detail-wiki-link"><a href="${escHtml(wikibooksUrl)}" target="_blank" rel="noopener"><img src="/static/img/wikibook_tiny_logo.png" alt="" width="18" height="18"><span>Lihat di Wikibuku</span></a></p>`;
+  if (detail.wikibooks) {
+    html += `<p class="detail-wiki-link"><a href="${escHtml(detail.wikibooks)}" target="_blank" rel="noopener"><img src="/static/img/wikibook_tiny_logo.png" alt="" width="18" height="18"><span>Lihat di Wikibuku</span></a></p>`;
   }
 
   return html;
 }
 
+function renderEmptyPropRow(attr) {
+  const inputType = { quantity: 'number', url: 'url' }[attr.type] || 'text';
+  const extraAttr = attr.type === 'quantity' ? ' step="any"' : '';
+  const unitText  = attr.type === 'quantity' ? (attr.unitLabel || attr.suffix || '') : '';
+  return `<li class="detail-prop-empty-row" data-pid="${escHtml(attr.pid)}">
+    <span class="detail-info-key">${escHtml(attr.label)}:</span>
+    <span class="prop-empty-badge">–</span>
+    <button class="js-prop-pencil prop-pencil-btn" title="Tambah nilai" type="button">✏</button>
+    <span class="prop-edit-inline hidden">
+      <span class="prop-edit-field">
+        <input type="${inputType}" class="prop-edit-input${attr.type === 'item' ? ' prop-edit-input--item' : ''}"
+               placeholder="${escHtml(INPUT_PLACEHOLDER[attr.type] || '')}" autocomplete="off"${extraAttr}>
+        ${attr.type === 'item' ? '<ul class="prop-suggest hidden" role="listbox"></ul>' : ''}
+      </span>
+      ${unitText ? `<span class="prop-edit-unit">${escHtml(unitText)}</span>` : ''}
+      <button class="prop-save-btn" type="button" title="Simpan">✓</button>
+      <button class="prop-cancel-btn" type="button" title="Batal">✕</button>
+    </span>
+  </li>`;
+}
+
 async function loadDetailProps(qid) {
   const r = State.records[qid];
-  if (!r) return;
-  const el = $(`detail-dynprops-${qid}`);
-  if (!el) return;
-
-  const klaster = State.params?.klasterNama || '';
-
-  if (r._dynPropsLoaded) {
-    el.innerHTML = renderDynPropsHtml(qid, { ...r._dynProps }, klaster);
-    attachPropEditHandlers(qid, el);
-    return;
-  }
+  if (!r || !$(`detail-dynprops-${qid}`)) return;
 
   try {
-    const props = await fetchDetailProps(qid, klaster, State.abortCtrl?.signal);
-    r._dynProps = props;
-    r._dynPropsLoaded = true;
-    const dynEl = $(`detail-dynprops-${qid}`);
-    if (dynEl) {
-      dynEl.innerHTML = renderDynPropsHtml(qid, { ...props }, klaster);
-      attachPropEditHandlers(qid, dynEl);
+    if (!r._detail) {
+      r._detail = await fetchDetailProps(qid, State.params?.klasterNama || '', State.abortCtrl?.signal);
     }
-  } catch (_) {
-    const dynEl = $(`detail-dynprops-${qid}`);
-    if (dynEl) dynEl.innerHTML = '';
+    renderDetailProps(qid);
+  } catch (err) {
+    if (err.name === 'AbortError') return;
+    const el = $(`detail-dynprops-${qid}`);
+    if (el) el.innerHTML = '<p class="detail-excerpt-loading">Gagal memuat detail.</p>';
   }
 }
 
+function renderDetailProps(qid) {
+  const r  = State.records[qid];
+  const el = $(`detail-dynprops-${qid}`);
+  if (!el || !r?._detail) return;
+  el.innerHTML = renderDynPropsHtml(qid, r._detail, State.params?.klasterNama || '');
+  attachPropEditHandlers(qid, el);
+}
+
+/** Nilai tampilan untuk atribut yang baru disimpan (tanpa perlu memuat ulang). */
+function formatNilaiBaru(attr, value, itemLabel) {
+  if (attr.type === 'item') return { text: itemLabel };
+  if (attr.type === 'quantity') {
+    const angka = parseFloat(value).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+    return { text: [angka, attr.unitLabel || attr.suffix || ''].filter(Boolean).join(' ') };
+  }
+  if (attr.type === 'time') {
+    const [y, m, d] = value.split('-');
+    const prec = d ? 11 : m ? 10 : 9;
+    return { text: formatDate(`+${y.padStart(4, '0')}-${m || '00'}-${d || '00'}`, prec) };
+  }
+  if (attr.type === 'url') {
+    return { text: value.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''), url: value };
+  }
+  return { text: value };
+}
+
 function attachPropEditHandlers(qid, container) {
-  container.querySelectorAll('.js-prop-pencil').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const li = btn.closest('li');
-      li.querySelector('.prop-empty-badge').classList.add('hidden');
-      btn.classList.add('hidden');
-      li.querySelector('.prop-edit-inline').classList.remove('hidden');
-      li.querySelector('.prop-edit-input').focus();
-    });
-  });
+  const attrByPid = Object.fromEntries(
+    skemaKategori(State.params?.klasterNama || '').map(a => [a.pid, a])
+  );
 
-  container.querySelectorAll('.prop-cancel-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const li = btn.closest('li');
-      li.querySelector('.prop-empty-badge').classList.remove('hidden');
-      li.querySelector('.js-prop-pencil').classList.remove('hidden');
-      li.querySelector('.prop-edit-inline').classList.add('hidden');
-      li.querySelector('.prop-edit-input').value = '';
-    });
-  });
+  const closeEdit = li => {
+    li.querySelector('.prop-empty-badge').classList.remove('hidden');
+    li.querySelector('.js-prop-pencil').classList.remove('hidden');
+    li.querySelector('.prop-edit-inline').classList.add('hidden');
+    li.querySelector('.prop-suggest')?.classList.add('hidden');
+    const input = li.querySelector('.prop-edit-input');
+    input.value = '';
+    delete input.dataset.qid;
+    delete input.dataset.label;
+  };
 
-  container.querySelectorAll('.prop-save-btn').forEach(btn => {
-    btn.addEventListener('click', async () => {
-      const li    = btn.closest('li');
-      const input = li.querySelector('.prop-edit-input');
-      const val   = input.value.trim();
-      if (!val) { input.focus(); return; }
+  const save = async li => {
+    const attr  = attrByPid[li.dataset.pid];
+    const input = li.querySelector('.prop-edit-input');
+    const btn   = li.querySelector('.prop-save-btn');
+    if (!attr || btn.disabled) return;
 
-      const { propkey, pid, dtype, unit } = li.dataset;
-      btn.disabled    = true;
-      btn.textContent = '…';
+    let value = input.value.trim();
+    if (!value) { input.focus(); return; }
 
-      try {
-        const res  = await fetch(`/api/item/${qid}/add-claim`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ property: pid, value: val, datatype: dtype, unit }),
-        });
-        const data = await res.json();
+    if (attr.type === 'item') {
+      if (!input.dataset.qid) {
+        appShowDialog('Pilih salah satu butir dari daftar saran.', 'alert', 'Perhatian');
+        return;
+      }
+      value = input.dataset.qid;
+    } else if (attr.type === 'time' && !/^\d{1,4}(-\d{2}(-\d{2})?)?$/.test(value)) {
+      appShowDialog('Format tanggal: TTTT, TTTT-BB, atau TTTT-BB-HH (contoh: 1945-08-17).', 'alert', 'Perhatian');
+      return;
+    }
 
-        if (!res.ok || data.error) {
-          appShowDialog(data.error || 'Gagal menyimpan.', 'alert', 'Kesalahan');
-          btn.disabled    = false;
-          btn.textContent = '✓';
-          return;
-        }
+    btn.disabled    = true;
+    btn.textContent = '…';
 
-        // Update cache lokal agar baris kosong hilang setelah re-render
-        const r = State.records[qid];
-        if (r?._dynProps) r._dynProps[propkey] = val;
+    try {
+      const res  = await fetch(`/api/item/${qid}/add-claim`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ property: attr.pid, value, datatype: attr.type, unit: attr.unit || '' }),
+      });
+      const data = await res.json();
 
-        const dynEl = $(`detail-dynprops-${qid}`);
-        if (dynEl && r?._dynProps) {
-          dynEl.innerHTML = renderDynPropsHtml(qid, { ...r._dynProps }, State.params?.klasterNama);
-          attachPropEditHandlers(qid, dynEl);
-        }
-      } catch (err) {
-        appShowDialog(`Error: ${err.message}`, 'alert', 'Kesalahan');
+      if (!res.ok || data.error) {
+        appShowDialog(data.error || 'Gagal menyimpan.', 'alert', 'Kesalahan');
         btn.disabled    = false;
         btn.textContent = '✓';
+        return;
       }
+
+      const r = State.records[qid];
+      if (r?._detail) {
+        r._detail.values[attr.pid] = formatNilaiBaru(attr, value, input.dataset.label);
+        renderDetailProps(qid);
+      }
+    } catch (err) {
+      appShowDialog(`Error: ${err.message}`, 'alert', 'Kesalahan');
+      btn.disabled    = false;
+      btn.textContent = '✓';
+    }
+  };
+
+  container.querySelectorAll('.detail-prop-empty-row').forEach(li => {
+    const input = li.querySelector('.prop-edit-input');
+
+    li.querySelector('.js-prop-pencil').addEventListener('click', () => {
+      li.querySelector('.prop-empty-badge').classList.add('hidden');
+      li.querySelector('.js-prop-pencil').classList.add('hidden');
+      li.querySelector('.prop-edit-inline').classList.remove('hidden');
+      input.focus();
     });
+    li.querySelector('.prop-cancel-btn').addEventListener('click', () => closeEdit(li));
+    li.querySelector('.prop-save-btn').addEventListener('click', () => save(li));
+    input.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); save(li); }
+      if (e.key === 'Escape') closeEdit(li);
+    });
+
+    const suggest = li.querySelector('.prop-suggest');
+    if (suggest) attachItemSuggest(input, suggest);
   });
 }
 
@@ -940,6 +874,7 @@ async function loadSingleItemMedia(qid) {
   try {
     const media = await fetchSingleItemMedia(qid, State.abortCtrl?.signal);
     Object.assign(r, media);
+    mapRefreshMarkerIcon(r);
     if (document.getElementById(`detail-excerpt-${qid}`)) renderDetail(qid);
   } catch (_) {}
 }
@@ -985,23 +920,6 @@ function openLightbox(filename) {
 function closeLightbox() {
   $('lightbox-overlay')?.classList.add('hidden');
 }
-
-// ---------------------------------------------------------------------------
-// DIALOG — global agar map.js bisa akses
-// ---------------------------------------------------------------------------
-function appShowDialog(html, type = 'alert', title = 'Pesan') {
-  const overlay = $('dialog-overlay');
-  if (!overlay) { alert(title + '\n' + html.replace(/<[^>]+>/g, '')); return; }
-  const titleEl = overlay.querySelector('.dialog-title') || $('dialog-title');
-  const bodyEl  = overlay.querySelector('.dialog-body')  || $('dialog-message');
-  const cancelEl = $('dialog-btn-cancel');
-  if (titleEl) titleEl.textContent = title;
-  if (bodyEl)  bodyEl.innerHTML    = html;
-  cancelEl?.classList.toggle('hidden', type === 'alert');
-  overlay.classList.remove('hidden');
-}
-
-window.appShowDialog = appShowDialog;
 
 // ---------------------------------------------------------------------------
 // MOBILE BOTTOM-SHEET
@@ -1052,15 +970,6 @@ function initBottomSheet() {
 }
 
 // ---------------------------------------------------------------------------
-// ESCAPING
-// ---------------------------------------------------------------------------
-function escHtml(str) {
-  return String(str ?? '')
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
-
-// ---------------------------------------------------------------------------
 // MAP POPUP HTML
 // ---------------------------------------------------------------------------
 function buildMapPopupHtml(r) {
@@ -1094,9 +1003,6 @@ function openBottomSheet() {
 document.addEventListener('DOMContentLoaded', () => {
 
   initDOM();
-
-  // Sembunyikan preloader
-  window.addEventListener('load', () => $('preloader')?.classList.add('hidden'));
 
   // Peta
   mapInit(qid => {
@@ -1147,6 +1053,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Form
+  enhanceSearchableSelect(DOM.selectProvinsi, 'Ketik atau pilih provinsi…');
+  enhanceSearchableSelect(DOM.selectNegara, 'Ketik atau pilih negara…');
+  enhanceSearchableSelect(DOM.selectKategori, 'Ketik atau pilih kategori…');
   updateFormVisibility();
   DOM.selectTipe?.addEventListener('change', updateFormVisibility);
   DOM.selectKategori?.addEventListener('change', updateQidFromKategori);
@@ -1170,6 +1079,17 @@ document.addEventListener('DOMContentLoaded', () => {
   DOM.btnGambar?.addEventListener('click',  () => { State.viewMode = 'grid'; State.filter.mediaOnly = 'image';   applyFilter(); });
   DOM.btnSemua?.addEventListener('click',   () => { State.viewMode = 'list'; State.filter.mediaOnly = null;      applyFilter(); });
 
+  // Buka halaman Perkaya Data dengan wilayah & kategori pencarian saat ini
+  $('btn-perkaya')?.addEventListener('click', e => {
+    const p = State.params;
+    if (!p) return;
+    e.preventDefault();
+    const q = new URLSearchParams({ tipe: p.wilayah, kategori: p.klasterNama });
+    if (p.provQid)   q.set('prov', p.provQid);
+    if (p.negaraQid) q.set('negara', p.negaraQid);
+    location.href = `${e.currentTarget.getAttribute('href')}?${q}`;
+  });
+
   // Navigasi panel
   $('nav-beranda')?.addEventListener('click', e => { e.preventDefault(); showSection('landing'); });
   $('nav-hasil')?.addEventListener('click', e => {
@@ -1190,13 +1110,6 @@ document.addEventListener('DOMContentLoaded', () => {
   DOM.btnNext?.addEventListener('click', () => {
     if (State.currentIndex < State.visibleIds.length - 1) openDetail(State.currentIndex + 1);
   });
-
-  // Dialog
-  $('dialog-overlay')?.addEventListener('click', e => {
-    if (!e.target.closest('.dialog-box')) $('dialog-overlay').classList.add('hidden');
-  });
-  $('dialog-btn-confirm')?.addEventListener('click', () => $('dialog-overlay')?.classList.add('hidden'));
-  $('dialog-btn-cancel')?.addEventListener('click',  () => $('dialog-overlay')?.classList.add('hidden'));
 
   // Lightbox
   $('lightbox-overlay')?.addEventListener('click', e => {
@@ -1306,7 +1219,10 @@ function initLinkPhotoModal() {
         return;
       }
 
-      if (State.records[qid]) State.records[qid].imageFilename = data.filename;
+      if (State.records[qid]) {
+        State.records[qid].imageFilename = data.filename;
+        mapRefreshMarkerIcon(State.records[qid]);
+      }
       setLinkPhotoStatus('success', '✓ Foto berhasil ditautkan ke Wikidata (P18).');
       $('link-photo-btn-label').textContent = 'Selesai';
 
@@ -1443,6 +1359,7 @@ function initUploadModal() {
       // Berhasil — perbarui state dan re-render detail
       if (State.records[qid]) {
         State.records[qid].imageFilename = data.filename;
+        mapRefreshMarkerIcon(State.records[qid]);
       }
 
       if (data.warning) {
