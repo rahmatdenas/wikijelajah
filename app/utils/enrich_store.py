@@ -70,8 +70,9 @@ def _now():
 
 def get_db():
     if 'enrich_db' not in g:
-        os.makedirs(current_app.instance_path, exist_ok=True)
-        conn = sqlite3.connect(os.path.join(current_app.instance_path, 'wikijelajah.db'))
+        data_dir = current_app.config.get('DATA_DIR') or current_app.instance_path
+        os.makedirs(data_dir, exist_ok=True)
+        conn = sqlite3.connect(os.path.join(data_dir, 'wikijelajah.db'))
         conn.row_factory = sqlite3.Row
         conn.executescript(SCHEMA)
         _migrate(conn)
