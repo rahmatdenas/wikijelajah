@@ -601,13 +601,15 @@ function valueEditorHtml(c) {
     ${c.datatype === 'time' ? '<small class="pk-hint">Format: TTTT, TTTT-BB, atau TTTT-BB-HH</small>' : ''}`;
 }
 
-function sourceHtml(c, src) {
+/** Satu sumber. Bila sumbernya lebih dari satu, ada radio untuk memilih yang dijadikan referensi. */
+function sourceHtml(c, src, index, pickable) {
   const v = verifView(src.verification);
   let host = '';
   try { host = new URL(src.url).hostname; } catch {}
-  return `<li class="pk-source">
+  return `<li class="pk-source${pickable && index === 0 ? ' selected' : ''}">
     <div class="pk-source-head">
-      <span class="pk-dot pk-dot--${v.cls}" title="${escHtml(v.label)}"></span>
+      ${pickable ? `<input type="radio" name="pk-ref-${c.id}" value="${index}"${index === 0 ? ' checked' : ''}
+        ${src.url ? '' : 'disabled'} aria-label="Jadikan referensi">` : ''}
       <strong>${escHtml(src.title || host || 'Sumber')}</strong>
       <span class="pk-source-verif pk-source-verif--${v.cls}" title="${escHtml(src.verify_note || '')}">${escHtml(v.label)}</span>
     </div>
@@ -618,6 +620,7 @@ function sourceHtml(c, src) {
 
 function optionHtml(c, index, multi) {
   const sources = c.sources || [];
+  const pickable = sources.length > 1;
   return `<section class="pk-option${multi && index === 0 ? ' selected' : ''}" data-id="${c.id}">
     ${multi ? `<label class="pk-option-head">
         <input type="radio" name="pk-option" value="${c.id}"${index === 0 ? ' checked' : ''}>
@@ -630,7 +633,10 @@ function optionHtml(c, index, multi) {
     </div>
     <div class="pk-field">
       <span class="pk-field-label">Sumber (${sources.length})</span>
-      <ol class="pk-sources">${sources.map(src => sourceHtml(c, src)).join('') || '<li class="pk-hint">Tanpa sumber</li>'}</ol>
+      <div>
+        ${pickable ? '<small class="pk-hint">Pilih satu sumber yang dijadikan referensi.</small>' : ''}
+        <ol class="pk-sources">${sources.map((src, i) => sourceHtml(c, src, i, pickable)).join('') || '<li class="pk-hint">Tanpa sumber</li>'}</ol>
+      </div>
     </div>
   </section>`;
 }
@@ -686,6 +692,9 @@ function renderCard() {
     const radio = sec.querySelector('input[name="pk-option"]');
     if (radio && !radio.checked) { radio.checked = true; radio.dispatchEvent(new Event('change')); }
   }));
+  card.querySelectorAll('.pk-sources input[type="radio"]').forEach(radio => radio.addEventListener('change', () =>
+    radio.closest('.pk-sources').querySelectorAll('.pk-source').forEach(li =>
+      li.classList.toggle('selected', li.contains(radio)))));
   $('pk-btn-approve').addEventListener('click', approveCurrent);
   $('pk-btn-reject').addEventListener('click', rejectCurrent);
 }
@@ -759,6 +768,7 @@ async function approveCurrent() {
   const body = c.datatype === 'item'
     ? { value_qid: input.dataset.qid || '', value_label: input.dataset.label || '' }
     : { value: input.value.trim() };
+  body.source_index = Number(document.querySelector(`input[name="pk-ref-${c.id}"]:checked`)?.value ?? 0);
   if (c.datatype === 'item' && !body.value_qid) {
     setCardStatus('error', 'Pilih butir Wikidata dari daftar saran terlebih dahulu.');
     input.focus();
