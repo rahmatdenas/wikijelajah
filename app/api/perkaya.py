@@ -199,6 +199,16 @@ def perkaya_approve(cand_id):
     except DataValueError as e:
         return jsonify({'error': str(e)}), 400
 
+    # Hanya satu referensi yang dikirim: sumber pilihan pengguna (bawaan: sumber terbaik)
+    sources = cand.get('sources') or []
+    try:
+        src_index = int(body.get('source_index', 0))
+    except (TypeError, ValueError):
+        src_index = -1
+    if sources and not 0 <= src_index < len(sources):
+        return jsonify({'error': 'Referensi yang dipilih tidak valid'}), 400
+    ref_source = sources[src_index] if sources and sources[src_index].get('url') else None
+
     api_url = current_app.config['WIKIMEDIA_API_BASE']
     headers = {'User-Agent': _ua()}
     qid, pid = cand['qid'], cand['pid']
@@ -215,7 +225,8 @@ def perkaya_approve(cand_id):
         return jsonify({'error': f'{pid} pada {qid} sudah terisi di Wikidata. Tolak kandidat ini atau periksa butirnya.'}), 409
 
     oauth = _get_authed_session()
-    source = cand.get('source_title') or urlparse(cand.get('source_url') or '').hostname or 'sumber web'
+    chosen = ref_source or {}
+    source = chosen.get('title') or urlparse(chosen.get('url') or '').hostname or 'sumber web'
     summary = f'Menambah {pid} dari "{source[:80]}" via WikiJelajah (Perkaya Data) #WikiJelajah'
 
     try:
@@ -234,28 +245,28 @@ def perkaya_approve(cand_id):
     revid = created.get('pageinfo', {}).get('lastrevid')
     warning = None
 
-    # Satu referensi per sumber (sumber yang sepakat pada nilai ini dicantumkan semua)
-    ref_sources = [x for x in cand.get('sources') or [] if x.get('url')] if claim_id else []
-    failed_refs = []
-    for src in ref_sources:
+    if claim_id and ref_source:
         try:
             ref = oauth.post(api_url, data={
                 'action': 'wbsetreference', 'statement': claim_id,
-                'snaks': json.dumps(_build_reference(src)), 'token': csrf, 'format': 'json',
+                'snaks': json.dumps(_build_reference(ref_source)), 'token': csrf, 'format': 'json',
                 'summary': 'Menambah referensi via WikiJelajah (Perkaya Data) #WikiJelajah',
             }, headers=headers, timeout=30).json()
         except (requests.RequestException, ValueError) as e:
-            failed_refs.append(f"{src.get('title') or src['url']}: {e}")
-            continue
+            ref = {'error': {'info': str(e)}}
         if 'error' in ref:
-            failed_refs.append(f"{src.get('title') or src['url']}: {ref['error'].get('info', '')}")
+            warning = f"Nilai tersimpan, tetapi referensi gagal ditambahkan: {ref['error'].get('info', '')}"
         else:
             revid = ref.get('pageinfo', {}).get('lastrevid', revid)
-    if failed_refs:
-        warning = 'Nilai tersimpan, tetapi sebagian referensi gagal ditambahkan: ' + '; '.join(failed_refs)
 
+    # Kolom ringkas mencatat referensi yang benar-benar dikirim
+    chosen_fields = {
+        'source_title': chosen.get('title', ''), 'source_url': chosen.get('url', ''),
+        'quote': chosen.get('quote', ''), 'quote_lang': chosen.get('quote_language', 'und'),
+        'verification': chosen.get('verification'), 'verify_note': chosen.get('verify_note', ''),
+    } if chosen else {}
     updated = update_candidate(user, cand_id, status='published', published_value=display_value,
-                               claim_id=claim_id, revid=revid)
+                               claim_id=claim_id, revid=revid, **chosen_fields)
     # Pilihan nilai lain untuk sel yang sama tidak dipakai lagi
     updated['rejected_ids'] = reject_siblings(user, qid, pid, cand_id)
     if warning:

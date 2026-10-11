@@ -60,7 +60,8 @@ COLUMNS = (
     'value', 'source_title', 'source_url', 'quote', 'quote_lang', 'verification',
     'verify_note', 'note', 'provider', 'model', 'status', 'sources',
 )
-UPDATABLE = ('status', 'value', 'published_value', 'claim_id', 'revid', 'note')
+UPDATABLE = ('status', 'value', 'published_value', 'claim_id', 'revid', 'note',
+             'source_title', 'source_url', 'quote', 'quote_lang', 'verification', 'verify_note')
 
 
 def _now():
