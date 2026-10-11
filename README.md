@@ -58,6 +58,30 @@ Buka browser di `http://localhost:5000` (atau port yang ditampilkan di terminal)
 - Upload foto ke Wikimedia Commons
 - Cache hasil pencarian di browser (sessionStorage)
 
+## Deploy ke Toolforge
+
+Aplikasi dijalankan dengan [Build Service](https://wikitech.wikimedia.org/wiki/Help:Toolforge/Build_Service) (`Procfile` + gunicorn). Database Perkaya disimpan di `$TOOL_DATA_DIR` sehingga tetap ada antar-deploy.
+
+**Sekali saja (setup awal):**
+```bash
+ssh <username>@login.toolforge.org
+become <nama-tool>
+
+toolforge envvars create FLASK_ENV                 # isi: production
+toolforge envvars create SECRET_KEY                # string acak panjang
+toolforge envvars create WIKIMEDIA_CLIENT_ID       # dari OAuth 2.0 consumer
+toolforge envvars create WIKIMEDIA_CLIENT_SECRET
+```
+Callback OAuth consumer: `https://<nama-tool>.toolforge.org/oauth/callback`. Jangan isi `WIKIMEDIA_ACCESS_TOKEN` di Toolforge — itu hanya untuk pengembangan lokal.
+
+**Setiap update:**
+```bash
+toolforge build start https://github.com/rahmatdenas/wikijelajah --ref main
+toolforge webservice buildservice start --mount=all   # pertama kali
+toolforge webservice restart                          # update berikutnya
+toolforge webservice logs                             # bila ada masalah
+```
+
 ## Lisensi
 
 Dirilis di bawah [Lisensi MIT](LICENSE).
