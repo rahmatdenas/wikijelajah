@@ -10,7 +10,7 @@ const WD_COMMONS_URL = 'https://commons.wikimedia.org/wiki/';
 const WD_COMMONS_API = 'https://commons.wikimedia.org/w/api.php';
 const WD_WIKI_API = 'https://id.wikipedia.org/w/api.php';
 const WD_API = 'https://www.wikidata.org/w/api.php';
-const WD_PAGE_SIZE = 5000;
+const WD_PAGE_SIZE = 5000; 
 const WD_COORD_BATCH = 1000;
 const WD_MEDIA_BATCH = 200;
 
@@ -51,7 +51,7 @@ WHERE {
     SELECT DISTINCT ?s ?p ?l WHERE {
       <KURUNG_BUKA>
       <WILAYAH>
-      ?s wdt:P17 wd:Q252 ; wdt:P625 [] ; wdt:P18 [] ; wdt:P131 ?l .
+      ?s <FILTER_NEGARA_ANY> wdt:P625 [] ; wdt:P18 [] ; wdt:P131 ?l .
       ?l wdt:P131* ?p .
       <KURUNG_TUTUP>
       <UNION>
@@ -181,7 +181,7 @@ const KLASTER_KHUSUS_NASIONAL = new Set([
  */
 function buildItemsQuery(p) {
   const {
-    jenis, wilayah, provQid = '', negaraQid = '',
+    jenis, wilayah, provQid = '', negaraQid = '', wilayahNegaraQid = '',
     propLokasi = 'P131', propTahun = 'P571', klasterNama = 'Objek',
     useSubclass = false,
     limit = WD_PAGE_SIZE, offset = 0,
@@ -189,6 +189,9 @@ function buildItemsQuery(p) {
 
   const p31Match = useSubclass ? 'wdt:P31/wdt:P279*' : 'wdt:P31';
   const isApapun = jenis === 'apapun';
+  // "Semua Jenis Objek" wajib dibatasi negara agar tidak timeout: Indonesia, atau negara
+  // dari Q-ID wilayah bebas (bisa di luar negeri)
+  const filterNegaraAny = `wdt:P17 ${(wilayah === 'qid' && wilayahNegaraQid) || 'wd:Q252'} ;`;
 
   const fill = (tpl, vars) =>
     Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(k, 'g'), v), tpl);
@@ -225,6 +228,7 @@ function buildItemsQuery(p) {
     const tpl = isApapun ? _T_ITEMS_ANY : _T_ITEMS;
     return fill(tpl, {
       '<WILAYAH>': '?p wdt:P31 wd:Q5098 .',
+      '<FILTER_NEGARA_ANY>': filterNegaraAny,
       '<JENIS>': jenis,
       '<PROP_LOKASI>': propLokasi,
       '<PROP_TAHUN>': propTahun,
@@ -234,15 +238,16 @@ function buildItemsQuery(p) {
     });
   }
 
-  // --- Provinsi tertentu ---
+  // --- Provinsi tertentu, atau Q-ID wilayah bebas (pola sama: sub-wilayah + wilayah itu sendiri) ---
   const unionBase = isApapun
-    ? `?s wdt:P17 wd:Q252 ; wdt:P625 [] ; wdt:P18 [] ; wdt:P131 ?l .`
+    ? `?s ${filterNegaraAny} wdt:P625 [] ; wdt:P18 [] ; wdt:P131 ?l .`
     : `?s ${p31Match} ?j ; wdt:${propLokasi} ?l .`;
   const unionClause = `UNION { BIND(${provQid} AS ?p) BIND(${provQid} AS ?l) ${unionBase} }`;
 
   const tpl = isApapun ? _T_ITEMS_ANY : _T_ITEMS;
   return fill(tpl, {
     '<WILAYAH>': `?p wdt:P131 ${provQid}.`,
+    '<FILTER_NEGARA_ANY>': filterNegaraAny,
     '<JENIS>': jenis,
     '<PROP_LOKASI>': propLokasi,
     '<PROP_TAHUN>': propTahun,
@@ -286,20 +291,47 @@ async function sparqlWithRetry(query, signal, maxRetry = 3) {
   }
 }
 
+/** Gabungan beberapa AbortSignal: batal bila salah satunya batal. */
+function anySignal(signals) {
+  const list = signals.filter(Boolean);
+  if (AbortSignal.any) return AbortSignal.any(list);
+  const ctrl = new AbortController();
+  list.forEach(s => s.aborted
+    ? ctrl.abort()
+    : s.addEventListener('abort', () => ctrl.abort(), { once: true }));
+  return ctrl.signal;
+}
+
 /**
  * Fetch semua halaman dari query yang sudah punya LIMIT/OFFSET.
+ * Data masuk per halaman utuh; halaman yang sedang ditarik saat berhenti/gagal tidak dipakai.
  * @param {Function} queryFn  - (limit, offset) => string query
- * @param {AbortSignal} signal
+ * @param {AbortSignal} signal - batal total (pencarian baru / Batalkan): melempar AbortError
  * @param {Function} onRow    - dipanggil per baris
  * @param {Function} onPage   - dipanggil per halaman dengan total akumulatif
+ * @param {Object}  [opts]
+ * @param {AbortSignal} [opts.stopSignal] - "Cukupkan": berhenti, pertahankan halaman yang sudah masuk
+ * @param {boolean} [opts.keepPartial]    - bila sebuah halaman gagal, kembalikan yang sudah ada alih-alih melempar galat
+ * @returns {Promise<{complete: boolean, reason?: 'stopped'|'error', error?: Error, total: number}>}
  */
-async function fetchAllPages(queryFn, signal, onRow, onPage) {
+async function fetchAllPages(queryFn, signal, onRow, onPage, opts = {}) {
+  const { stopSignal = null, keepPartial = false } = opts;
+  const pageSignal = stopSignal ? anySignal([signal, stopSignal]) : signal;
   let offset = 0, total = 0;
 
   while (true) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (stopSignal?.aborted) return { complete: false, reason: 'stopped', total };
 
-    const rows = await sparqlWithRetry(queryFn(WD_PAGE_SIZE, offset), signal);
+    let rows;
+    try {
+      rows = await sparqlWithRetry(queryFn(WD_PAGE_SIZE, offset), pageSignal);
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      if (stopSignal?.aborted) return { complete: false, reason: 'stopped', total };
+      if (keepPartial && total > 0) return { complete: false, reason: 'error', error: err, total };
+      throw err;
+    }
     rows.forEach(onRow);
 
     const unique = new Set(rows.map(r =>
@@ -309,7 +341,7 @@ async function fetchAllPages(queryFn, signal, onRow, onPage) {
     total += unique;
     onPage?.(total);
 
-    if (unique < WD_PAGE_SIZE) break;
+    if (unique < WD_PAGE_SIZE) return { complete: true, total };
     offset += WD_PAGE_SIZE;
   }
 }
@@ -852,6 +884,40 @@ async function fetchDetailProps(qid, klasterNama, signal) {
 }
 
 /** Saran butir Wikidata untuk input atribut bertipe item. */
+/**
+ * Cari wilayah administratif (kota, kabupaten, kecamatan, desa, … di mana pun) berdasarkan nama.
+ * Hasil pencarian Wikidata disaring ke turunan "administrative territorial entity" (Q56061).
+ * @returns {Promise<Array<{id, label, description, negara}>>} urut relevansi pencarian
+ */
+async function searchWilayah(term, signal) {
+  const q = `SELECT ?item ?itemLabel ?itemDescription ?negara WHERE {
+    SERVICE wikibase:mwapi {
+      bd:serviceParam wikibase:api "EntitySearch" ; wikibase:endpoint "www.wikidata.org" ;
+                      mwapi:search ${JSON.stringify(term)} ; mwapi:language "id" ; mwapi:limit "30" .
+      ?item wikibase:apiOutputItem mwapi:item .
+      ?ordinal wikibase:apiOrdinal true .
+    }
+    ?item wdt:P31/wdt:P279* wd:Q56061 .
+    OPTIONAL { ?item wdt:P17 ?negara . }
+    SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul" . }
+  } ORDER BY ?ordinal`;
+  const rows = await sparqlPost(q, signal);
+  const seen = new Set();
+  return rows.reduce((out, r) => {
+    const id = r.item.value.split('/').pop();
+    if (!seen.has(id)) {
+      seen.add(id);
+      out.push({
+        id,
+        label: r.itemLabel?.value || id,
+        description: r.itemDescription?.value || '',
+        negara: r.negara ? r.negara.value.split('/').pop() : '',
+      });
+    }
+    return out;
+  }, []).slice(0, 10);
+}
+
 async function searchWikidataItems(term, signal) {
   const data = await _wbGet({
     action: 'wbsearchentities', search: term, language: 'id', uselang: 'id',

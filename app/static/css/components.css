@@ -693,6 +693,26 @@ select option {
   margin: 0 0 6px;
 }
 
+.wilayah-field { display: block; }
+.wilayah-field .prop-suggest { width: 100%; max-width: none; }
+.prop-suggest-item.active { background: var(--color-gray-100); }
+
+.qid-wilayah-info { display: block; margin-top: 4px; font-size: var(--text-sm); color: var(--color-gray-600); }
+.qid-wilayah-info--ok  { color: #1d5e1d; }
+.qid-wilayah-info--bad { color: #8f1111; }
+
+.btn-cukupkan { margin: var(--space-3) 0 var(--space-1); }
+
+.hasil-partial-note {
+  margin: 0 0 var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: 3px solid #c68a00;
+  background: #fff8e5;
+  color: #7a5600;
+  font-size: var(--text-sm);
+  border-radius: var(--radius-sm);
+}
+
 .loading-subtitle {
   font-size: var(--text-sm);
   color: var(--color-gray-600);
@@ -891,7 +911,7 @@ select option {
 
 .prop-pencil-btn {
   background: none; border: none; padding: 0 4px; cursor: pointer;
-  color: var(--color-gray-400); font-size: 13px; vertical-align: middle;
+  color: var(--color-gray-400); font-size: 16px; font-weight: 700; line-height: 1; vertical-align: middle;
   opacity: 0; transition: opacity 0.15s;
 }
 .detail-prop-empty-row:hover .prop-pencil-btn { opacity: 1; }

@@ -18,7 +18,12 @@ const State = {
   params:      null,
   mediaLoaded: false,
   abortCtrl:   null,
+  stopCtrl:    null,      // "Cukupkan pencarian": hentikan penarikan, tampilkan yang sudah ada
+  partial:     false,     // hasil tidak lengkap → jangan disimpan ke cache sesi
 };
+
+// Jumlah data minimal sebelum tombol "Cukupkan pencarian" muncul
+const CUKUPKAN_MIN_DATA = 5000;
 
 let _activeSection = 'landing';
 let _listBuilt = false;
@@ -32,6 +37,8 @@ const DOM = {
   // Form
   selectTipe:      null,
   wadahProvinsi:   null,
+  wadahQidWilayah: null,
+  inputQidWilayah: null,
   selectProvinsi:  null,
   wadahLuarNegeri: null,
   selectNegara:    null,
@@ -63,6 +70,8 @@ function initDOM() {
   };
   DOM.selectTipe       = $('select-wilayah-tipe');
   DOM.wadahProvinsi    = $('wadah-provinsi');
+  DOM.wadahQidWilayah  = $('wadah-qid-wilayah');
+  DOM.inputQidWilayah  = $('input-qid-wilayah');
   DOM.selectProvinsi   = $('select-provinsi');
   DOM.wadahLuarNegeri  = $('wadah-luar-negeri');
   DOM.selectNegara     = $('select-negara');
@@ -107,6 +116,143 @@ function updateFormVisibility() {
   const tipe = DOM.selectTipe.value;
   DOM.wadahProvinsi.classList.toggle('hidden', tipe !== 'provinsi');
   DOM.wadahLuarNegeri.classList.toggle('hidden', tipe !== 'luar_negeri');
+  DOM.wadahQidWilayah?.classList.toggle('hidden', tipe !== 'qid');
+  if (tipe === 'qid' && !DOM.inputQidWilayah.value) DOM.inputQidWilayah.focus();
+}
+
+/** "Q123", "wd:Q123", atau URL Wikidata → "wd:Q123"; selain itu null. */
+function normalizeWilayahQid(text) {
+  const m = String(text || '').trim().match(/^(?:wd:|https?:\/\/\S*\/)?(Q\d+)$/i);
+  return m ? `wd:${m[1].toUpperCase()}` : null;
+}
+
+// ---------------------------------------------------------------------------
+// INPUT "CARI WILAYAH": ketik nama → pilih dari saran, atau ketik Q-ID langsung.
+// Wilayah terpilih disimpan di dataset input: qid ("Q123"), label, negara ("wd:Q252").
+// ---------------------------------------------------------------------------
+let _wilayahTimer = null, _wilayahCtrl = null, _wilayahResults = [], _wilayahActive = -1;
+
+function setWilayahInfo(cls, text) {
+  const info = $('qid-wilayah-info');
+  info.className = `qid-wilayah-info${cls ? ' qid-wilayah-info--' + cls : ''}`;
+  info.textContent = text;
+}
+
+function hideWilayahSuggest() {
+  $('qid-wilayah-suggest').classList.add('hidden');
+  DOM.inputQidWilayah.setAttribute('aria-expanded', 'false');
+  _wilayahActive = -1;
+}
+
+/** Simpan wilayah terpilih ke input dan tampilkan konfirmasinya. */
+function selectWilayah(w) {
+  const input = DOM.inputQidWilayah;
+  input.value = w.label;
+  input.dataset.qid = w.id;
+  input.dataset.label = w.label;
+  if (w.negara) input.dataset.negara = `wd:${w.negara}`;
+  hideWilayahSuggest();
+  setWilayahInfo('ok', `✓ ${w.label} (${w.id})${w.description ? ' — ' + w.description : ''}`);
+}
+
+function renderWilayahSuggest() {
+  const list = $('qid-wilayah-suggest');
+  list.innerHTML = _wilayahResults.length
+    ? _wilayahResults.map((w, i) => `
+        <li class="prop-suggest-item${i === _wilayahActive ? ' active' : ''}" role="option" data-index="${i}"
+            aria-selected="${i === _wilayahActive}">
+          <span class="prop-suggest-label">${escHtml(w.label)}</span>
+          <span class="prop-suggest-qid">${escHtml(w.id)}</span>
+          ${w.description ? `<span class="prop-suggest-desc">${escHtml(w.description)}</span>` : ''}
+        </li>`).join('')
+    : '<li class="prop-suggest-empty">Tidak ada wilayah dengan nama ini</li>';
+  list.classList.remove('hidden');
+  DOM.inputQidWilayah.setAttribute('aria-expanded', 'true');
+}
+
+/** Q-ID diketik langsung: periksa keberadaannya, ambil nama & negaranya. */
+async function resolveWilayahQid(id, signal) {
+  const [data, claims] = await Promise.all([
+    _wbGet({ action: 'wbgetentities', ids: id, props: 'labels|descriptions', languages: 'id|en|mul' }, signal),
+    _wbGet({ action: 'wbgetclaims', entity: id, property: 'P17' }, signal).catch(() => ({})),
+  ]);
+  const e = data.entities?.[id];
+  if (!e || 'missing' in e) return null;
+  return {
+    id,
+    label: e.labels?.id?.value || e.labels?.en?.value || e.labels?.mul?.value || id,
+    description: e.descriptions?.id?.value || e.descriptions?.en?.value || '',
+    // Negara wilayah — membatasi query "Semua Jenis Objek" agar tidak timeout
+    negara: _itemId(bestRankClaims(claims.claims?.P17)[0]?.mainsnak?.datavalue?.value) || '',
+  };
+}
+
+function onQidWilayahInput() {
+  const input = DOM.inputQidWilayah;
+  ['qid', 'label', 'negara'].forEach(k => delete input.dataset[k]);
+  clearTimeout(_wilayahTimer);
+  _wilayahCtrl?.abort();
+  _wilayahResults = [];
+  hideWilayahSuggest();
+
+  const raw = input.value.trim();
+  const qid = normalizeWilayahQid(raw);
+  if (!raw) return setWilayahInfo('', 'Ketik nama kota, kabupaten, atau kecamatan, lalu pilih dari daftar.');
+  if (!qid && raw.length < 2) return setWilayahInfo('', 'Ketik minimal 2 huruf.');
+
+  setWilayahInfo('', qid ? 'Memeriksa Q-ID…' : 'Mencari wilayah…');
+  _wilayahTimer = setTimeout(async () => {
+    _wilayahCtrl = new AbortController();
+    try {
+      if (qid) {
+        const w = await resolveWilayahQid(qid.slice(3), _wilayahCtrl.signal);
+        if (!w) return setWilayahInfo('bad', `${qid.slice(3)} tidak ditemukan di Wikidata.`);
+        selectWilayah(w);
+        input.value = raw;  // biarkan Q-ID yang diketik tetap terlihat
+        return;
+      }
+      _wilayahResults = await searchWilayah(raw, _wilayahCtrl.signal);
+      renderWilayahSuggest();
+      setWilayahInfo(_wilayahResults.length ? '' : 'bad', _wilayahResults.length
+        ? 'Pilih wilayah dari daftar (↑ ↓ lalu Enter).'
+        : 'Wilayah tidak ditemukan. Coba ejaan lain atau masukkan Q-ID.');
+    } catch (err) {
+      if (err.name !== 'AbortError') setWilayahInfo('bad', 'Gagal mencari wilayah, coba lagi.');
+    }
+  }, qid ? 300 : 450);
+}
+
+function onQidWilayahKeydown(e) {
+  const list = $('qid-wilayah-suggest');
+  if (list.classList.contains('hidden') || !_wilayahResults.length) return;
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    const n = _wilayahResults.length;
+    _wilayahActive = (_wilayahActive + (e.key === 'ArrowDown' ? 1 : -1) + n) % n;
+    renderWilayahSuggest();
+    list.querySelector('.active')?.scrollIntoView({ block: 'nearest' });
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    selectWilayah(_wilayahResults[Math.max(_wilayahActive, 0)]);
+  } else if (e.key === 'Escape') {
+    hideWilayahSuggest();
+  }
+}
+
+function initWilayahSearch() {
+  const input = DOM.inputQidWilayah, list = $('qid-wilayah-suggest');
+  if (!input || !list) return;
+  input.addEventListener('input', onQidWilayahInput);
+  input.addEventListener('keydown', onQidWilayahKeydown);
+  // mousedown (bukan click) agar input tidak kehilangan fokus sebelum pilihan tercatat
+  list.addEventListener('mousedown', e => {
+    const li = e.target.closest('.prop-suggest-item');
+    if (!li) return;
+    e.preventDefault();
+    selectWilayah(_wilayahResults[+li.dataset.index]);
+  });
+  input.addEventListener('blur', () => setTimeout(hideWilayahSuggest, 150));
+  input.addEventListener('focus', () => { if (_wilayahResults.length && !input.dataset.qid) renderWilayahSuggest(); });
 }
 
 function updateQidFromKategori() {
@@ -212,8 +358,20 @@ async function startSearch() {
   const propTahun    = opt.dataset.tahun     || 'P571';
   const useSubclass  = opt.dataset.subclass  === '1';
 
+  // Wilayah terpilih dari saran, atau Q-ID yang diketik langsung
+  const wilayahQid = tipe !== 'qid' ? null
+    : DOM.inputQidWilayah.dataset.qid ? `wd:${DOM.inputQidWilayah.dataset.qid}`
+    : normalizeWilayahQid(DOM.inputQidWilayah.value);
+  if (tipe === 'qid' && !wilayahQid) {
+    appShowDialog('Pilih wilayah dari daftar saran, atau masukkan Q-ID wilayah (mis. wd:Q11477).', 'alert', 'Perhatian');
+    DOM.inputQidWilayah?.focus();
+    return;
+  }
+
   const wilayahNama = tipe === 'provinsi'
     ? DOM.selectProvinsi.options[DOM.selectProvinsi.selectedIndex]?.text || ''
+    : tipe === 'qid'
+    ? DOM.inputQidWilayah.dataset.label || wilayahQid.slice(3)
     : tipe === 'luar_negeri'
     ? DOM.selectNegara.options[DOM.selectNegara.selectedIndex]?.text || ''
     : 'Indonesia';
@@ -221,7 +379,9 @@ async function startSearch() {
   const params = {
     jenis, klasterNama, propLokasi, propTahun, useSubclass,
     wilayah:   tipe === 'provinsi' ? 'provinsi' : tipe,
-    provQid:   tipe === 'provinsi' ? provQid : '',
+    // Q-ID wilayah bebas memakai jalur query yang sama dengan provinsi
+    provQid:   tipe === 'provinsi' ? provQid : tipe === 'qid' ? wilayahQid : '',
+    wilayahNegaraQid: tipe === 'qid' ? (DOM.inputQidWilayah.dataset.negara || '') : '',
     negaraQid: tipe === 'luar_negeri' ? negaraQid : '',
   };
 
@@ -234,6 +394,8 @@ async function startSearch() {
 
   State.abortCtrl?.abort();
   State.abortCtrl = new AbortController();
+  State.stopCtrl  = new AbortController();
+  State.partial   = false;
   const signal = State.abortCtrl.signal;
 
   mapClear();
@@ -261,7 +423,7 @@ async function startSearch() {
     // ===== FASE 1: Item + koordinat langsung dari SPARQL =====
     const queryFn = (limit, offset) => buildItemsQuery({ ...params, limit, offset });
 
-    await fetchAllPages(queryFn, signal, row => {
+    const fetched = await fetchAllPages(queryFn, signal, row => {
       const qid = row.SQ?.value;
       if (!qid) return;
       const pQid    = row.PQ?.value || null;
@@ -282,12 +444,18 @@ async function startSearch() {
         State.records[qid].provLabel = row.pLabel?.value || '';
       }
     }, total => {
-      setLoadingStatus(`Menarik ${klasterNama} di ${wilayahNama}… ${total} ditemukan`);
-    });
+      setLoadingStatus(`Menarik ${klasterNama} di ${wilayahNama}… ${total.toLocaleString('id-ID')} ditemukan`);
+      // Tombol "Cukupkan" baru muncul bila data sudah cukup banyak
+      if (total >= CUKUPKAN_MIN_DATA) $('cukupkan-wrap')?.classList.remove('hidden');
+    }, { stopSignal: State.stopCtrl.signal, keepPartial: true });
 
     if (signal.aborted) return;
 
     const allQids = Object.keys(State.records);
+    if (!fetched.complete) {
+      State.partial = true;
+      showPartialNote(fetched, allQids.length);
+    }
     if (!allQids.length) {
       setLoadingStatus(null);
       DOM.searchInput && (DOM.searchInput.placeholder = '0 hasil ditemukan');
@@ -311,7 +479,9 @@ async function startSearch() {
     setLoadingStatus(null);
 
     // ===== FASE 3: Media (background) =====
-    loadMediaBackground(allQids, signal, () => _saveCache(cacheKey, State.records, State.sortedIds));
+    loadMediaBackground(allQids, signal, () => {
+      if (!State.partial) _saveCache(cacheKey, State.records, State.sortedIds);
+    });
 
   } catch (err) {
     if (err.name === 'AbortError') return;
@@ -320,8 +490,25 @@ async function startSearch() {
   }
 }
 
+/** Beri tahu bahwa hasil hanya sebagian, beserta alasannya. */
+function showPartialNote(fetched, count) {
+  const note = $('hasil-partial-note');
+  if (!note) return;
+  const n = count.toLocaleString('id-ID');
+  note.textContent = fetched.reason === 'stopped'
+    ? (count ? `Hasil sebagian: pencarian dicukupkan, menampilkan ${n} butir yang sudah tertarik.`
+             : 'Pencarian dicukupkan sebelum ada data yang tertarik.')
+    : `Hasil sebagian: penarikan terhenti karena galat (${fetched.error?.message || 'tidak diketahui'}). ` +
+      `Menampilkan ${n} butir yang sempat tertarik.`;
+  note.classList.remove('hidden');
+}
+
 function resetHasilUI() {
   _listBuilt = false;
+  $('hasil-partial-note')?.classList.add('hidden');
+  $('cukupkan-wrap')?.classList.add('hidden');
+  const btnCukup = $('btn-cukupkan');
+  if (btnCukup) { btnCukup.disabled = false; btnCukup.textContent = 'Cukupkan pencarian'; }
   if (DOM.hasilList) DOM.hasilList.innerHTML = '';
   if (DOM.filterWilayah) DOM.filterWilayah.innerHTML = '<option value="all">Semua Wilayah</option>';
   if (DOM.filterUrut) DOM.filterUrut.innerHTML = `
@@ -725,7 +912,7 @@ function renderEmptyPropRow(attr) {
   return `<li class="detail-prop-empty-row" data-pid="${escHtml(attr.pid)}">
     <span class="detail-info-key">${escHtml(attr.label)}:</span>
     <span class="prop-empty-badge">–</span>
-    <button class="js-prop-pencil prop-pencil-btn" title="Tambah nilai" type="button">✏</button>
+    <button class="js-prop-pencil prop-pencil-btn" title="Tambah nilai" aria-label="Tambah nilai" type="button">+</button>
     <span class="prop-edit-inline hidden">
       <span class="prop-edit-field">
         <input type="${inputType}" class="prop-edit-input${attr.type === 'item' ? ' prop-edit-input--item' : ''}"
@@ -1058,8 +1245,16 @@ document.addEventListener('DOMContentLoaded', () => {
   enhanceSearchableSelect(DOM.selectKategori, 'Ketik atau pilih kategori…');
   updateFormVisibility();
   DOM.selectTipe?.addEventListener('change', updateFormVisibility);
+  initWilayahSearch();
   DOM.selectKategori?.addEventListener('change', updateQidFromKategori);
   DOM.btnJelajahi?.addEventListener('click', startSearch);
+
+  // Cukupkan: hentikan penarikan, tampilkan data yang sudah masuk
+  $('btn-cukupkan')?.addEventListener('click', e => {
+    e.currentTarget.disabled = true;
+    e.currentTarget.textContent = 'Menghentikan…';
+    State.stopCtrl?.abort();
+  });
 
   // Batalkan (tombol di dalam panel-hasil)
   $('btn-batalkan')?.addEventListener('click', () => {

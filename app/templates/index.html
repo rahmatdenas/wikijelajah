@@ -30,6 +30,7 @@
         <option value="provinsi" selected>Provinsi di Indonesia</option>
         <option value="all">Seluruh Indonesia</option>
         <option value="luar_negeri">Luar Negeri</option>
+        <option value="qid">Q-ID wilayah (kota, kabupaten, kecamatan…)</option>
       </select>
     </div>
 
@@ -55,6 +56,18 @@
         </optgroup>
         {% endfor %}
       </select>
+    </div>
+
+    {# 2c. Q-ID wilayah bebas — kota/kabupaten/kecamatan/desa, di mana pun #}
+    <div id="wadah-qid-wilayah" class="form-group hidden">
+      <label class="form-label" for="input-qid-wilayah">Cari Wilayah</label>
+      <div class="prop-edit-field wilayah-field">
+        <input type="text" id="input-qid-wilayah" class="form-input"
+               placeholder="Ketik nama (mis. Padang) atau Q-ID (wd:Q11477)" autocomplete="off" spellcheck="false"
+               role="combobox" aria-autocomplete="list" aria-controls="qid-wilayah-suggest">
+        <ul id="qid-wilayah-suggest" class="prop-suggest hidden" role="listbox"></ul>
+      </div>
+      <small id="qid-wilayah-info" class="qid-wilayah-info">Ketik nama kota, kabupaten, atau kecamatan, lalu pilih dari daftar.</small>
     </div>
 
     {# 3. Kategori data #}
@@ -103,6 +116,9 @@
       <button id="btn-batalkan" class="btn-batalkan-kecil">Batalkan</button>
     </div>
 
+    {# Catatan bila hasil tidak lengkap (dihentikan pengguna / galat di tengah) #}
+    <p id="hasil-partial-note" class="hasil-partial-note hidden" role="status"></p>
+
     <div class="filter-header">
       <div class="filter-row">
         <select id="filter-wilayah" class="form-select">
@@ -126,6 +142,11 @@
         <div class="loader loader--center"></div>
         <p class="loading-title" id="loading-center-text">Menarik data…</p>
         <p class="loading-subtitle" id="loading-center-sub"></p>
+        {# Muncul setelah data mencapai CUKUPKAN_MIN_DATA (main.js) #}
+        <div id="cukupkan-wrap" class="hidden">
+          <button id="btn-cukupkan" type="button" class="btn btn--secondary btn--sm btn-cukupkan">Cukupkan pencarian</button>
+          <p class="loading-subtitle">Hentikan penarikan dan tampilkan data yang sudah tertarik.</p>
+        </div>
       </div>
       <ol id="hasil-list" class="result-list"></ol>
     </div>
