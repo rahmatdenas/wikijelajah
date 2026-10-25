@@ -80,7 +80,7 @@
           <optgroup label="{{ msg(group.group) }}">
           {% endif %}
           {% for value, klaster, key, attrs in group['items'] %}
-          <option value="{{ value }}" data-klaster="{{ klaster }}"
+          <option value="{{ value }}" data-klaster="{{ klaster }}" data-slug="{{ key | replace('category-', '', 1) }}"
             {% for k, v in attrs.items() %}{{ k }}="{{ v }}" {% endfor %}>{{ msg(key) }}</option>
           {% endfor %}
           {% if group.group %}
@@ -131,7 +131,7 @@
         <button class="feature-btn loading" id="btn-jelajahi-gambar"  data-filter="image">{{ msg('filter-images') }}</button>
         <button class="feature-btn loading" id="btn-semua-hasil"      data-filter="all">{{ msg('filter-all-results') }}</button>
       </div>
-      {# <a href="{{ url_for('main.perkaya') }}" id="btn-perkaya" class="perkaya-bridge">✨ {{ msg('enrich-bridge') }} →</a> #}
+      {# <a href="{{ url_for('main.enrich') }}" id="btn-enrich" class="enrich-bridge">✨ {{ msg('enrich-bridge') }} →</a> #}
     </div>
 
     <input type="search" id="search-input" class="search-input"

@@ -1,7 +1,7 @@
 'use strict';
 
 /* ==========================================================================
-   perkaya.js — Halaman Perkaya Data: cek kelengkapan atribut, cari nilai
+   enrich.js — Halaman Perkaya Data (/enrich): cek kelengkapan atribut, cari nilai
    yang kosong dengan AI, validasi kandidat, lalu simpan ke Wikidata.
    Butuh: ui.js (helper UI), wikidata.js (query & skema kategori).
    ========================================================================== */
@@ -27,6 +27,9 @@ const PK = {
 };
 
 const cellKey = (qid, pid) => `${qid}|${pid}`;
+
+// Nilai ?region= di URL (bahasa Inggris) ↔ nilai internal dropdown tipe wilayah
+const REGION_FROM_PARAM = { province: 'provinsi', all: 'all', abroad: 'luar_negeri' };
 
 // ---------------------------------------------------------------------------
 // PENGATURAN AI (disimpan di localStorage browser)
@@ -118,7 +121,11 @@ function readParams() {
   };
 }
 
-/** Isi form dari query string, mis. tautan "Perkaya data ini" dari halaman Jelajah. */
+/**
+ * Isi form dari query string, mis. tautan "Perkaya data ini" dari halaman Jelajah:
+ * ?region=province|all|abroad&province=Q3125978&country=Q17&category=museums
+ * (category = slug kunci pesan kategori, lihat data-slug di template).
+ */
 function applyQueryParams() {
   const q = new URLSearchParams(location.search);
   const setSelect = (id, val) => {
@@ -128,11 +135,12 @@ function applyQueryParams() {
     el.dispatchEvent(new Event('change'));
     return true;
   };
-  setSelect('pk-wilayah-tipe', q.get('tipe'));
-  setSelect('pk-provinsi', q.get('prov'));
-  setSelect('pk-negara', q.get('negara'));
-  const kat = q.get('kategori');
-  const opt = kat && [...$('pk-kategori').options].find(o => o.dataset.klaster === kat);
+  const wdQid = v => v && `wd:${v.replace(/^wd:/, '')}`;
+  setSelect('pk-wilayah-tipe', REGION_FROM_PARAM[q.get('region')]);
+  setSelect('pk-provinsi', wdQid(q.get('province')));
+  setSelect('pk-negara', wdQid(q.get('country')));
+  const slug = q.get('category');
+  const opt = slug && [...$('pk-kategori').options].find(o => o.dataset.slug === slug);
   if (opt) {
     $('pk-kategori').value = opt.value;
     $('pk-kategori').dispatchEvent(new Event('change'));
@@ -439,7 +447,7 @@ async function searchCell(key, settings) {
   refreshCell(key);
 
   try {
-    const res = await fetch('/api/perkaya/search', {
+    const res = await fetch('/api/enrich/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -471,7 +479,7 @@ async function searchCell(key, settings) {
 // KANDIDAT (server)
 // ---------------------------------------------------------------------------
 async function refreshOpenCandidates() {
-  const res = await fetch('/api/perkaya/candidates?group=open');
+  const res = await fetch('/api/enrich/candidates?group=open');
   PK.open = res.ok ? await res.json() : [];
   syncCellsFromOpen();
   renderQueue();
@@ -788,7 +796,7 @@ async function approveCurrent() {
   setCardBusy(true);
   setCardStatus('info', msg('pk-saving'));
   try {
-    const res  = await fetch(`/api/perkaya/candidates/${c.id}/approve`, {
+    const res  = await fetch(`/api/enrich/candidates/${c.id}/approve`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
@@ -812,7 +820,7 @@ async function rejectCurrent() {
   setCardBusy(true);
   try {
     for (const c of opts) {
-      const res = await fetch(`/api/perkaya/candidates/${c.id}/reject`, { method: 'POST' });
+      const res = await fetch(`/api/enrich/candidates/${c.id}/reject`, { method: 'POST' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         setCardStatus('error', data.error || msg('pk-cell-error'));
@@ -848,7 +856,7 @@ function initValidasi() {
 // TAB RIWAYAT
 // ---------------------------------------------------------------------------
 async function loadHistory() {
-  const res = await fetch('/api/perkaya/candidates?group=history');
+  const res = await fetch('/api/enrich/candidates?group=history');
   PK.history = res.ok ? await res.json() : [];
   renderHistory();
 }

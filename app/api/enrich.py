@@ -34,9 +34,9 @@ def _clip(value, n):
 # Cari nilai satu atribut untuk satu butir
 # ---------------------------------------------------------------------------
 
-@api.route('/perkaya/search', methods=['POST'])
+@api.route('/enrich/search', methods=['POST'])
 @login_required
-def perkaya_search():
+def enrich_search():
     body = request.get_json(silent=True) or {}
     provider = body.get('provider', '')
     if provider not in ai_search.DEFAULT_MODELS:
@@ -138,18 +138,18 @@ def _verify_source(datatype, value, src, lang):
 # Daftar kandidat milik pengguna
 # ---------------------------------------------------------------------------
 
-@api.route('/perkaya/candidates')
+@api.route('/enrich/candidates')
 @login_required
-def perkaya_candidates():
+def enrich_candidates():
     statuses = STATUS_GROUPS.get(request.args.get('group', 'open'))
     if not statuses:
         return jsonify({'error': msg('api-group-invalid')}), 400
     return jsonify(list_candidates(_username(), statuses))
 
 
-@api.route('/perkaya/candidates/<int:cand_id>/reject', methods=['POST'])
+@api.route('/enrich/candidates/<int:cand_id>/reject', methods=['POST'])
 @login_required
-def perkaya_reject(cand_id):
+def enrich_reject(cand_id):
     cand = get_candidate(_username(), cand_id)
     if not cand or cand['status'] != 'pending':
         return jsonify({'error': msg('api-candidate-missing')}), 404
@@ -183,9 +183,9 @@ def _build_reference(src):
     return snaks
 
 
-@api.route('/perkaya/candidates/<int:cand_id>/approve', methods=['POST'])
+@api.route('/enrich/candidates/<int:cand_id>/approve', methods=['POST'])
 @login_required
-def perkaya_approve(cand_id):
+def enrich_approve(cand_id):
     user = _username()
     cand = get_candidate(user, cand_id)
     if not cand or cand['status'] != 'pending':
@@ -232,7 +232,7 @@ def perkaya_approve(cand_id):
     oauth = _get_authed_session()
     chosen = ref_source or {}
     source = chosen.get('title') or urlparse(chosen.get('url') or '').hostname or 'sumber web'
-    summary = f'Menambah {pid} dari "{source[:80]}" via WikiJelajah (Perkaya Data) #WikiJelajah'
+    summary = f'Menambah {pid} dari "{source[:80]}" via WikiJelajah (Enrich Data) #WikiJelajah'
 
     try:
         csrf = _get_csrf_token(oauth, api_url)
@@ -255,7 +255,7 @@ def perkaya_approve(cand_id):
             ref = oauth.post(api_url, data={
                 'action': 'wbsetreference', 'statement': claim_id,
                 'snaks': json.dumps(_build_reference(ref_source)), 'token': csrf, 'format': 'json',
-                'summary': 'Menambah referensi via WikiJelajah (Perkaya Data) #WikiJelajah',
+                'summary': 'Menambah referensi via WikiJelajah (Enrich Data) #WikiJelajah',
             }, headers=headers, timeout=30).json()
         except (requests.RequestException, ValueError) as e:
             ref = {'error': {'info': str(e)}}

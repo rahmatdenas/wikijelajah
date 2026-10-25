@@ -356,6 +356,7 @@ async function startSearch() {
   // klasterNama = kunci internal (nama Indonesia); klasterLabel = teks tampilan sesuai bahasa
   const klasterNama  = opt.dataset.klaster   || opt.textContent.trim();
   const klasterLabel = opt.textContent.trim();
+  const klasterSlug  = opt.dataset.slug || '';
   const propLokasi   = opt.dataset.lokasi    || 'P131';
   const propTahun    = opt.dataset.tahun     || 'P571';
   const useSubclass  = opt.dataset.subclass  === '1';
@@ -379,7 +380,7 @@ async function startSearch() {
     : 'Indonesia';
 
   const params = {
-    jenis, klasterNama, klasterLabel, propLokasi, propTahun, useSubclass,
+    jenis, klasterNama, klasterLabel, klasterSlug, propLokasi, propTahun, useSubclass,
     wilayah:   tipe === 'provinsi' ? 'provinsi' : tipe,
     // Q-ID wilayah bebas memakai jalur query yang sama dengan provinsi
     provQid:   tipe === 'provinsi' ? provQid : tipe === 'qid' ? wilayahQid : '',
@@ -1274,13 +1275,15 @@ document.addEventListener('DOMContentLoaded', () => {
   DOM.btnSemua?.addEventListener('click',   () => { State.viewMode = 'list'; State.filter.mediaOnly = null;      applyFilter(); });
 
   // Buka halaman Perkaya Data dengan wilayah & kategori pencarian saat ini
-  $('btn-perkaya')?.addEventListener('click', e => {
+  $('btn-enrich')?.addEventListener('click', e => {
     const p = State.params;
     if (!p) return;
     e.preventDefault();
-    const q = new URLSearchParams({ tipe: p.wilayah, kategori: p.klasterNama });
-    if (p.provQid)   q.set('prov', p.provQid);
-    if (p.negaraQid) q.set('negara', p.negaraQid);
+    const region = { provinsi: 'province', all: 'all', luar_negeri: 'abroad' }[p.wilayah];
+    const q = new URLSearchParams({ category: p.klasterSlug });
+    if (region) q.set('region', region);
+    if (region === 'province') q.set('province', p.provQid.replace(/^wd:/, ''));
+    if (p.negaraQid) q.set('country', p.negaraQid.replace(/^wd:/, ''));
     location.href = `${e.currentTarget.getAttribute('href')}?${q}`;
   });
 

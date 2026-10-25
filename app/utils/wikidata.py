@@ -252,6 +252,16 @@ KATEGORI_DATA = [
 ]
 
 
+
+def kategori_slug(klaster):
+    """Slug kategori untuk URL (?category=museums) dari nama klaster Indonesia; None bila tidak dikenal."""
+    for group in KATEGORI_DATA:
+        for _value, name, key, _attrs in group['items']:
+            if name == klaster:
+                return key.removeprefix('category-')
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Nama provinsi & negara dalam bahasa antarmuka
 # Nama di atas berbahasa Indonesia. Untuk bahasa lain, label diambil dari

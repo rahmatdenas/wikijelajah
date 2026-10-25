@@ -3,14 +3,14 @@
 {% block title %}{{ msg('nav-enrich') }} · {{ config.APP_NAME }}{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="{{ url_for('static', filename='css/perkaya.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/enrich.css') }}">
 {% endblock %}
 
 {% block body %}
 
 {% include '_top_nav.html' %}
 
-<main id="perkaya-page" class="perkaya-page">
+<main id="enrich-page" class="enrich-page">
 
 {% if not user %}
   <section class="pk-login">
@@ -58,7 +58,7 @@
           {% for group in kategori_data %}
             {% if group.group %}<optgroup label="{{ msg(group.group) }}">{% endif %}
             {% for value, klaster, key, attrs in group['items'] if value != 'custom' %}
-            <option value="{{ value }}" data-klaster="{{ klaster }}"
+            <option value="{{ value }}" data-klaster="{{ klaster }}" data-slug="{{ key | replace('category-', '', 1) }}"
               {% for k, v in attrs.items() %}{{ k }}="{{ v }}" {% endfor %}>{{ msg(key) }}</option>
             {% endfor %}
             {% if group.group %}</optgroup>{% endif %}
@@ -195,5 +195,5 @@
 
 {% block scripts %}
 <script>const PK_DEFAULT_MODELS = {{ default_models | tojson }};</script>
-<script src="{{ url_for('static', filename='js/perkaya.js') }}"></script>
+<script src="{{ url_for('static', filename='js/enrich.js') }}"></script>
 {% endblock %}
