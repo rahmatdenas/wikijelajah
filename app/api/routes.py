@@ -6,6 +6,7 @@ import requests
 from flask import current_app, jsonify, request, session
 from requests_oauthlib import OAuth2Session
 from . import api
+from ..i18n import get_lang, msg
 from ..utils.datavalue import DataValueError, build_value
 
 
@@ -13,7 +14,7 @@ def login_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         if 'oauth_token' not in session:
-            return jsonify({'error': 'Autentikasi diperlukan'}), 401
+            return jsonify({'error': msg('pk-auth-required')}), 401
         return f(*args, **kwargs)
     return decorated
 
@@ -67,7 +68,7 @@ def item_summary(qid):
 
     entity = data.get('entities', {}).get(qid.upper(), {})
     if not entity:
-        return jsonify({'error': 'Butir tidak ditemukan'}), 404
+        return jsonify({'error': msg('item-not-found')}), 404
 
     return jsonify({
         'qid': qid.upper(),
@@ -88,7 +89,7 @@ def update_label(qid):
     body = request.get_json(silent=True) or {}
     new_label = body.get('label', '').strip()
     if not new_label:
-        return jsonify({'error': 'Label tidak boleh kosong'}), 400
+        return jsonify({'error': msg('api-label-empty')}), 400
 
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
     http = _get_session()
@@ -104,7 +105,7 @@ def update_label(qid):
     }, headers={'User-Agent': _ua()}).json()
 
     if 'error' in result:
-        return jsonify({'error': result['error'].get('info', 'Gagal menyimpan')}), 500
+        return jsonify({'error': result['error'].get('info', msg('save-failed'))}), 500
 
     return jsonify({'success': True, 'label': new_label})
 
@@ -128,7 +129,7 @@ def update_description(qid):
     }, headers={'User-Agent': _ua()}).json()
 
     if 'error' in result:
-        return jsonify({'error': result['error'].get('info', 'Gagal menyimpan')}), 500
+        return jsonify({'error': result['error'].get('info', msg('save-failed'))}), 500
 
     return jsonify({'success': True, 'description': new_desc})
 
@@ -149,7 +150,7 @@ def add_claim(qid):
     unit_qid = body.get('unit', '').strip()
 
     if not prop or not re.match(r'^P\d+$', prop):
-        return jsonify({'error': 'Format property tidak valid'}), 400
+        return jsonify({'error': msg('api-property-invalid')}), 400
     try:
         wd_value = build_value(datatype, val, unit_qid)
     except DataValueError as e:
@@ -162,7 +163,7 @@ def add_claim(qid):
     try:
         csrf = _get_csrf_token(http, wikidata_api)
     except Exception as e:
-        return jsonify({'error': f'Gagal ambil token: {e}'}), 500
+        return jsonify({'error': msg('api-token-failed', e)}), 500
 
     try:
         result = http.post(wikidata_api, data={
@@ -176,10 +177,10 @@ def add_claim(qid):
             'summary':  f'Menambah {prop} via WikiJelajah',
         }, headers={'User-Agent': ua}).json()
     except Exception as e:
-        return jsonify({'error': f'Gagal menulis ke Wikidata: {e}'}), 500
+        return jsonify({'error': msg('api-write-failed', e)}), 500
 
     if 'error' in result:
-        return jsonify({'error': result['error'].get('info', 'Gagal menyimpan')}), 500
+        return jsonify({'error': result['error'].get('info', msg('save-failed'))}), 500
 
     return jsonify({'success': True})
 
@@ -195,7 +196,7 @@ def set_image(qid):
     filename = body.get('filename', '').strip()
 
     if not filename:
-        return jsonify({'error': 'Nama file tidak boleh kosong'}), 400
+        return jsonify({'error': msg('upload-filename-required')}), 400
 
     if filename.lower().startswith('file:'):
         filename = filename[5:]
@@ -207,7 +208,7 @@ def set_image(qid):
     try:
         csrf_token = _get_csrf_token(http, wikidata_api)
     except Exception as e:
-        return jsonify({'error': f'Gagal ambil token: {e}'}), 500
+        return jsonify({'error': msg('api-token-failed', e)}), 500
 
     try:
         wd = http.post(
@@ -225,10 +226,10 @@ def set_image(qid):
             headers={'User-Agent': ua},
         ).json()
     except Exception as e:
-        return jsonify({'error': f'Gagal memperbarui Wikidata: {e}'}), 500
+        return jsonify({'error': msg('api-write-failed', e)}), 500
 
     if 'error' in wd:
-        return jsonify({'error': wd['error'].get('info', 'Gagal menambah P18')}), 500
+        return jsonify({'error': wd['error'].get('info', msg('link-photo-failed'))}), 500
 
     return jsonify({'success': True, 'filename': filename})
 
@@ -243,7 +244,7 @@ def upload_photo(qid):
     qid = qid.upper()
 
     if 'file' not in request.files:
-        return jsonify({'error': 'Tidak ada file yang dikirim'}), 400
+        return jsonify({'error': msg('upload-choose-photo')}), 400
 
     file      = request.files['file']
     filename  = request.form.get('filename', '').strip()
@@ -251,7 +252,7 @@ def upload_photo(qid):
     author    = session.get('user', {}).get('username', 'Unknown')
 
     if not filename:
-        return jsonify({'error': 'Nama file wajib diisi'}), 400
+        return jsonify({'error': msg('upload-filename-required')}), 400
 
     # Pastikan ekstensi ada
     ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'jpg'
@@ -275,14 +276,14 @@ def upload_photo(qid):
         ).json()
         csrf_commons = tok['query']['tokens']['csrftoken']
     except Exception as e:
-        return jsonify({'error': f'Gagal ambil token Commons: {e}'}), 500
+        return jsonify({'error': msg('api-token-failed', e)}), 500
 
     # 2. Wikitext halaman file
     today    = date.today().isoformat()
     wikitext = (
         f"=={{{{int:filedesc}}}}==\n"
         f"{{{{Information\n"
-        f"|description={{{{id|1={caption or filename}}}}}\n"
+        f"|description={{{{{get_lang()}|1={caption or filename}}}}}\n"
         f"|date={today}\n"
         f"|source={{{{own}}}}\n"
         f"|author=[[User:{author}|{author}]]\n"
@@ -309,14 +310,14 @@ def upload_photo(qid):
             headers={'User-Agent': ua},
         ).json()
     except Exception as e:
-        return jsonify({'error': f'Upload gagal: {e}'}), 500
+        return jsonify({'error': msg('api-upload-failed', e)}), 500
 
     if 'error' in up:
-        return jsonify({'error': up['error'].get('info', 'Upload ke Commons gagal')}), 500
+        return jsonify({'error': up['error'].get('info', msg('upload-failed'))}), 500
 
     upload_info = up.get('upload', {})
     if upload_info.get('result') not in ('Success', 'Warning'):
-        return jsonify({'error': f'Commons menolak upload: {up}'}), 500
+        return jsonify({'error': msg('api-upload-rejected', up)}), 500
 
     # Nama file final yang diterima Commons (bisa berbeda karena normalisasi)
     final_filename = upload_info.get('filename', filename)
@@ -333,7 +334,7 @@ def upload_photo(qid):
         return jsonify({
             'success': True,
             'filename': final_filename,
-            'warning': f'Foto diupload ke Commons tapi gagal ambil token Wikidata: {e}',
+            'warning': msg('api-upload-p18-failed', e),
         })
 
     # 5. Tambah klaim P18 ke Wikidata
@@ -356,14 +357,14 @@ def upload_photo(qid):
         return jsonify({
             'success': True,
             'filename': final_filename,
-            'warning': f'Foto diupload tapi gagal tambah P18: {e}',
+            'warning': msg('api-upload-p18-failed', e),
         })
 
     if 'error' in wd:
         return jsonify({
             'success': True,
             'filename': final_filename,
-            'warning': f'Foto diupload tapi P18 gagal: {wd["error"].get("info", "")}',
+            'warning': msg('api-upload-p18-failed', wd['error'].get('info', '')),
         })
 
     return jsonify({'success': True, 'filename': final_filename})

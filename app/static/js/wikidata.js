@@ -5,10 +5,23 @@
    Tidak menyentuh DOM sama sekali.
    ========================================================================== */
 
+// Bahasa data mengikuti bahasa antarmuka (I18N dari base.html): label Wikidata
+// dicari dalam bahasa itu dulu lalu jatuh ke Indonesia/Inggris, dan artikel
+// diambil dari Wikipedia bahasa itu.
+const WD_LANGS = [...new Set([I18N.lang, 'id', 'en', 'mul'])];
+const WIKI_LANG = I18N.lang;
+const WIKI_BASE = `https://${WIKI_LANG}.wikipedia.org`;
+
+/** Nilai multibahasa Wikidata ({lang: {value}}) dalam bahasa terbaik yang tersedia. */
+function pickLang(values) {
+  for (const l of WD_LANGS) if (values?.[l]?.value) return values[l].value;
+  return '';
+}
+
 const WD_SPARQL_URL = 'https://query.wikidata.org/sparql';
 const WD_COMMONS_URL = 'https://commons.wikimedia.org/wiki/';
 const WD_COMMONS_API = 'https://commons.wikimedia.org/w/api.php';
-const WD_WIKI_API = 'https://id.wikipedia.org/w/api.php';
+const WD_WIKI_API = `${WIKI_BASE}/w/api.php`;
 const WD_API = 'https://www.wikidata.org/w/api.php';
 const WD_PAGE_SIZE = 5000; 
 const WD_COORD_BATCH = 1000;
@@ -42,7 +55,7 @@ WHERE {
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
   BIND(SUBSTR(STR(?l),32) AS ?LQ)
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
 }`;
 
 const _T_ITEMS_ANY = `SELECT DISTINCT ?SQ ?sLabel ?PQ ?pLabel ?LQ ?lLabel ?tM ?tP
@@ -67,7 +80,7 @@ WHERE {
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
   BIND(SUBSTR(STR(?l),32) AS ?LQ)
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
 }`;
 
 const _T_ITEMS_NATIONAL = `SELECT DISTINCT ?SQ ?sLabel ?PQ ?pLabel ?lLabel ?tM ?tP
@@ -87,7 +100,7 @@ WHERE {
   }
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
   LIMIT <LIMIT> OFFSET <OFFSET>
 }`;
 
@@ -113,7 +126,7 @@ WHERE {
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
   BIND(SUBSTR(STR(?l),32) AS ?LQ)
-  SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul". }
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
 }`;
 
 const _T_COORDS = `SELECT DISTINCT ?siteQid ?coord WHERE {
@@ -139,8 +152,8 @@ const _T_MEDIA = `SELECT ?siteQid (SAMPLE(?img) AS ?image) (SAMPLE(?wikiTitle) A
     FILTER NOT EXISTS { ?imgStmt pq:P180 wd:Q192630 }
   }
   OPTIONAL {
-    ?wiki schema:about ?site ; schema:isPartOf <https://id.wikipedia.org/> .
-    BIND(SUBSTR(STR(?wiki),31) AS ?wikiTitle)
+    ?wiki schema:about ?site ; schema:isPartOf <${WIKI_BASE}/> .
+    BIND(STRAFTER(STR(?wiki), "/wiki/") AS ?wikiTitle)
   }
   OPTIONAL { ?site wdt:P373 ?cat . }
   BIND(SUBSTR(STR(?site),32) AS ?siteQid)
@@ -403,9 +416,7 @@ async function fetchMedia(qids, signal) {
       // Explicit null = "loaded, absent"; undefined = "not yet loaded"
       media[qid] = {
         imageFilename: r.image ? extractFilename(r.image.value) : null,
-        articleTitle:  r.wikipediaUrlTitle
-          ? decodeURIComponent(r.wikipediaUrlTitle.value.split('/').pop())
-          : null,
+        articleTitle:  r.wikipediaUrlTitle ? decodeURIComponent(r.wikipediaUrlTitle.value) : null,
         commonsCat: r.commonsCat ? r.commonsCat.value : null,
       };
     });
@@ -418,7 +429,7 @@ async function fetchMedia(qids, signal) {
 // SINGLE-ITEM MEDIA (cepat, via wbgetentities — dipakai saat batch belum selesai)
 // ---------------------------------------------------------------------------
 async function fetchSingleItemMedia(qid, signal) {
-  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${qid}&props=claims|sitelinks&sitefilter=idwiki&format=json&origin=*`;
+  const url = `https://www.wikidata.org/w/api.php?action=wbgetentities&ids=${qid}&props=claims|sitelinks&sitefilter=${WIKI_LANG}wiki&format=json&origin=*`;
   const resp = await fetch(url, { signal });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const data = await resp.json();
@@ -427,12 +438,12 @@ async function fetchSingleItemMedia(qid, signal) {
 
   const p18       = entity.claims?.P18;
   const p373      = entity.claims?.P373;
-  const idwiki    = entity.sitelinks?.idwiki;
+  const wiki      = entity.sitelinks?.[`${WIKI_LANG}wiki`];
 
   return {
     imageFilename: p18?.[0]?.mainsnak?.datavalue?.value?.replace(/ /g, '_') ?? null,
     commonsCat:    p373?.[0]?.mainsnak?.datavalue?.value ?? null,
-    articleTitle:  idwiki?.title ?? null,
+    articleTitle:  wiki?.title ?? null,
   };
 }
 
@@ -454,7 +465,7 @@ async function fetchWikipediaExcerpt(title, signal) {
   const raw = page.extract || '';
 
   const paragraphs = raw.match(/<p[^>]*>[\s\S]+?<\/p>/g) ?? [];
-  let pick = paragraphs.find(p => p.length > 50) ?? '<p>Ringkasan artikel belum memadai.</p>';
+  let pick = paragraphs.find(p => p.length > 50) ?? `<p>${escHtml(msg('detail-excerpt-short'))}</p>`;
   pick = pick
     .replace(/^<p[^>]*>(\s|<br\s*\/?>)*/i, '<p>')
     .replace(/<[^>]*>[^<]*(is deprecated|Lua error|Script error)[^<]*<\/[^>]*>/gi, '');
@@ -478,12 +489,12 @@ async function fetchImageCaption(encodedFilename, signal) {
   const data = await resp.json();
   const page = Object.values(data.query.pages)[0];
   const meta = page?.imageinfo?.[0]?.extmetadata;
-  if (!meta) return 'Data lisensi tidak tersedia.';
+  if (!meta) return escHtml(msg('detail-license-missing'));
 
   let artist = meta.Artist?.value?.trim()
     .replace(/<(?!\/?a ?)[^>]+>/g, '')
-    .replace(/Unknown authorUnknown author|UnknownUnknown/gi, 'Tak diketahui')
-    .replace(/AnonymousUnknown author/gi, 'Anonim')
+    .replace(/Unknown authorUnknown author|UnknownUnknown/gi, escHtml(msg('detail-author-unknown')))
+    .replace(/AnonymousUnknown author/gi, escHtml(msg('detail-author-anonymous')))
     .replace(/href="(?:https?:)?\/\//g, 'href="https://')
     .replace(/<a /gi, '<a target="_blank" ') ?? '';
 
@@ -531,21 +542,28 @@ function extractFilename(url) {
   ));
 }
 
+/** Tanggal Wikidata (+YYYY-MM-DD…) sesuai presisinya, dalam bahasa antarmuka. */
 function formatDate(dateStr, precision) {
   if (!dateStr) return null;
   const clean = dateStr.replace(/^[+-]/, '');
-  const year  = String(parseInt(clean.slice(0, 4), 10));  // '0601' → '601'
+  const yearNum = parseInt(clean.slice(0, 4), 10);
+  const year  = String(yearNum);  // '0601' → '601'
   const month = parseInt(clean.slice(5, 7));
   const day   = parseInt(clean.slice(8, 10));
   const prec  = parseInt(precision) || 9;
-  const M = ['','Januari','Februari','Maret','April','Mei','Juni',
-             'Juli','Agustus','September','Oktober','November','Desember'];
 
-  if (prec >= 11) return `${day} ${M[month]} ${year}`;
-  if (prec === 10) return `${M[month]} ${year}`;
+  if ((prec >= 10 && month) || prec >= 11) {
+    // setUTCFullYear agar tahun < 100 tidak dianggap 19xx
+    const d = new Date(Date.UTC(2000, (month || 1) - 1, day || 1));
+    d.setUTCFullYear(yearNum);
+    const opts = prec >= 11 && day
+      ? { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }
+      : { month: 'long', year: 'numeric', timeZone: 'UTC' };
+    try { return new Intl.DateTimeFormat(I18N.lang, opts).format(d); } catch { return year; }
+  }
   if (prec === 9)  return year;
-  if (prec === 8)  return `${year}-an`;
-  if (prec === 7)  return `Abad ke-${Math.ceil(parseInt(year) / 100)}`;
+  if (prec === 8)  return msg('date-decade', year);
+  if (prec === 7)  return msg('date-century', Math.ceil(yearNum / 100));
   return year;
 }
 
@@ -563,6 +581,7 @@ function commonsFilePageUrl(filename) {
 // ditampilkan dan bisa diisi langsung. Untuk menambah atribut, cukup tambah
 // entri di ATRIBUT lalu masukkan ke daftar kategori di SKEMA_KATEGORI.
 //
+// label/suffix/unitLabel diterjemahkan lewat i18n (attr-<kunci>, unit-*).
 // type: 'item' | 'quantity' | 'time' | 'url' | 'string'
 // unit: QID satuan default saat menambah nilai (quantity)
 // unitLabel: teks satuan yang ditampilkan bila nilai memakai satuan default
@@ -573,83 +592,83 @@ const Q_METER = 'Q11573';
 const Q_KM2   = 'Q712226';
 
 const ATRIBUT = {
-  lokasi:          { pid: 'P131',  label: 'Lokasi',             type: 'item' },
-  lokasiObjek:     { pid: 'P276',  label: 'Lokasi',             type: 'item' },
-  didirikan:       { pid: 'P571',  label: 'Didirikan',          type: 'time' },
-  ditetapkan:      { pid: 'P571',  label: 'Ditetapkan',         type: 'time' },
-  dibuat:          { pid: 'P571',  label: 'Dibuat',             type: 'time' },
-  kapasitas:       { pid: 'P1083', label: 'Kapasitas',          type: 'quantity', suffix: 'orang' },
-  gaya:            { pid: 'P149',  label: 'Gaya arsitektur',    type: 'item' },
-  arsitek:         { pid: 'P84',   label: 'Arsitek',            type: 'item' },
-  agama:           { pid: 'P140',  label: 'Agama',              type: 'item' },
-  denominasi:      { pid: 'P140',  label: 'Agama/denominasi',   type: 'item' },
-  warisan:         { pid: 'P1435', label: 'Status warisan',     type: 'item' },
-  laman:           { pid: 'P856',  label: 'Laman resmi',        type: 'url' },
-  koleksiJumlah:   { pid: 'P1436', label: 'Jumlah koleksi',     type: 'quantity' },
-  pengunjung:      { pid: 'P1174', label: 'Pengunjung/tahun',   type: 'quantity', suffix: 'orang' },
-  tempatTerbit:    { pid: 'P291',  label: 'Tempat terbit',      type: 'item' },
-  tanggalTerbit:   { pid: 'P577',  label: 'Tanggal terbit',     type: 'time' },
-  penerbit:        { pid: 'P123',  label: 'Penerbit',           type: 'item' },
-  bahasa:          { pid: 'P407',  label: 'Bahasa',             type: 'item' },
-  tempatTemu:      { pid: 'P189',  label: 'Tempat ditemukan',   type: 'item' },
-  tanggalTemu:     { pid: 'P575',  label: 'Tanggal ditemukan',  type: 'time' },
-  bahan:           { pid: 'P186',  label: 'Bahan',              type: 'item' },
-  koleksi:         { pid: 'P195',  label: 'Koleksi',            type: 'item' },
-  statusGuna:      { pid: 'P5817', label: 'Status penggunaan',  type: 'item' },
-  aksara:          { pid: 'P282',  label: 'Aksara',             type: 'item' },
-  periode:         { pid: 'P2348', label: 'Periode',            type: 'item' },
-  memperingati:    { pid: 'P547',  label: 'Memperingati',       type: 'item' },
-  pencipta:        { pid: 'P170',  label: 'Pencipta',           type: 'item' },
-  pelukis:         { pid: 'P170',  label: 'Pelukis',            type: 'item' },
-  tinggi:          { pid: 'P2048', label: 'Tinggi',             type: 'quantity', unit: Q_METER, unitLabel: 'm' },
-  jumlahKamar:     { pid: 'P8733', label: 'Jumlah kamar',       type: 'quantity' },
-  operator:        { pid: 'P137',  label: 'Operator',           type: 'item' },
-  pengelola:       { pid: 'P137',  label: 'Pengelola',          type: 'item' },
-  penghuni:        { pid: 'P466',  label: 'Penghuni',           type: 'item' },
-  penghuniKlub:    { pid: 'P466',  label: 'Penghuni/klub',      type: 'item' },
-  luas:            { pid: 'P2046', label: 'Luas',               type: 'quantity', unit: Q_KM2, unitLabel: 'km²' },
-  ranjang:         { pid: 'P6801', label: 'Jumlah ranjang',     type: 'quantity' },
-  pelajar:         { pid: 'P2196', label: 'Jumlah pelajar',     type: 'quantity', suffix: 'orang' },
-  permukaan:       { pid: 'P765',  label: 'Permukaan lapangan', type: 'item' },
-  rektor:          { pid: 'P1037', label: 'Rektor/direktur',    type: 'item' },
-  iata:            { pid: 'P238',  label: 'Kode IATA',          type: 'string' },
-  icao:            { pid: 'P239',  label: 'Kode ICAO',          type: 'string' },
-  ketinggian:      { pid: 'P2044', label: 'Ketinggian',         type: 'quantity', unit: Q_METER, unitLabel: 'mdpl' },
-  jalur:           { pid: 'P81',   label: 'Jalur',              type: 'item' },
-  perairan:        { pid: 'P206',  label: 'Perairan',           type: 'item' },
-  perairanSungai:  { pid: 'P206',  label: 'Perairan/sungai',    type: 'item' },
-  iucn:            { pid: 'P814',  label: 'Kategori IUCN',      type: 'item' },
-  kedalaman:       { pid: 'P4511', label: 'Kedalaman',          type: 'quantity', unit: Q_METER, unitLabel: 'm' },
-  panjang:         { pid: 'P2043', label: 'Panjang',            type: 'quantity', unit: Q_METER, unitLabel: 'm' },
-  pegunungan:      { pid: 'P4552', label: 'Pegunungan',         type: 'item' },
-  prominensi:      { pid: 'P2660', label: 'Prominensi',         type: 'quantity', unit: Q_METER, unitLabel: 'm' },
-  bagianDari:      { pid: 'P361',  label: 'Bagian dari',        type: 'item' },
-  penduduk:        { pid: 'P1082', label: 'Jumlah penduduk',    type: 'quantity', suffix: 'jiwa' },
-  waktu:           { pid: 'P585',  label: 'Waktu',              type: 'time' },
-  magnitudo:       { pid: 'P2527', label: 'Magnitudo',          type: 'quantity' },
-  korban:          { pid: 'P1120', label: 'Korban jiwa',        type: 'quantity', suffix: 'jiwa' },
-  penyebab:        { pid: 'P828',  label: 'Penyebab',           type: 'item' },
-  mulai:           { pid: 'P580',  label: 'Mulai',              type: 'time' },
-  berakhir:        { pid: 'P582',  label: 'Berakhir',           type: 'time' },
-  peserta:         { pid: 'P710',  label: 'Peserta',            type: 'item' },
-  latar:           { pid: 'P840',  label: 'Latar tempat',       type: 'item' },
-  penulis:         { pid: 'P50',   label: 'Penulis',            type: 'item' },
-  genre:           { pid: 'P136',  label: 'Genre',              type: 'item' },
-  subjek:          { pid: 'P921',  label: 'Subjek',             type: 'item' },
-  kepalaDaerah:    { pid: 'P6',    label: 'Kepala daerah',      type: 'item' },
-  tempatLahir:     { pid: 'P19',   label: 'Tempat lahir',       type: 'item' },
-  tanggalLahir:    { pid: 'P569',  label: 'Tanggal lahir',      type: 'time' },
-  pekerjaan:       { pid: 'P106',  label: 'Pekerjaan',          type: 'item' },
-  tanggalWafat:    { pid: 'P570',  label: 'Tanggal wafat',      type: 'time' },
-  berasalDari:     { pid: 'P2341', label: 'Berasal dari',       type: 'item' },
-  penutur:         { pid: 'P1098', label: 'Jumlah penutur',     type: 'quantity', suffix: 'orang' },
-  statusUnesco:    { pid: 'P1999', label: 'Status UNESCO',      type: 'item' },
-  negaraAsal:      { pid: 'P495',  label: 'Negara asal',        type: 'item' },
-  caraBuat:        { pid: 'P2079', label: 'Cara pembuatan',     type: 'item' },
-  waktuPelaksanaan:{ pid: 'P837',  label: 'Waktu pelaksanaan',  type: 'item' },
+  lokasi:          { pid: 'P131',  label: msg('attr-lokasi'),               type: 'item' },
+  lokasiObjek:     { pid: 'P276',  label: msg('attr-lokasi-objek'),         type: 'item' },
+  didirikan:       { pid: 'P571',  label: msg('attr-didirikan'),            type: 'time' },
+  ditetapkan:      { pid: 'P571',  label: msg('attr-ditetapkan'),           type: 'time' },
+  dibuat:          { pid: 'P571',  label: msg('attr-dibuat'),               type: 'time' },
+  kapasitas:       { pid: 'P1083', label: msg('attr-kapasitas'),            type: 'quantity', suffix: msg('unit-people') },
+  gaya:            { pid: 'P149',  label: msg('attr-gaya'),                 type: 'item' },
+  arsitek:         { pid: 'P84',   label: msg('attr-arsitek'),              type: 'item' },
+  agama:           { pid: 'P140',  label: msg('attr-agama'),                type: 'item' },
+  denominasi:      { pid: 'P140',  label: msg('attr-denominasi'),           type: 'item' },
+  warisan:         { pid: 'P1435', label: msg('attr-warisan'),              type: 'item' },
+  laman:           { pid: 'P856',  label: msg('attr-laman'),                type: 'url' },
+  koleksiJumlah:   { pid: 'P1436', label: msg('attr-koleksi-jumlah'),       type: 'quantity' },
+  pengunjung:      { pid: 'P1174', label: msg('attr-pengunjung'),           type: 'quantity', suffix: msg('unit-people') },
+  tempatTerbit:    { pid: 'P291',  label: msg('attr-tempat-terbit'),        type: 'item' },
+  tanggalTerbit:   { pid: 'P577',  label: msg('attr-tanggal-terbit'),       type: 'time' },
+  penerbit:        { pid: 'P123',  label: msg('attr-penerbit'),             type: 'item' },
+  bahasa:          { pid: 'P407',  label: msg('attr-bahasa'),               type: 'item' },
+  tempatTemu:      { pid: 'P189',  label: msg('attr-tempat-temu'),          type: 'item' },
+  tanggalTemu:     { pid: 'P575',  label: msg('attr-tanggal-temu'),         type: 'time' },
+  bahan:           { pid: 'P186',  label: msg('attr-bahan'),                type: 'item' },
+  koleksi:         { pid: 'P195',  label: msg('attr-koleksi'),              type: 'item' },
+  statusGuna:      { pid: 'P5817', label: msg('attr-status-guna'),          type: 'item' },
+  aksara:          { pid: 'P282',  label: msg('attr-aksara'),               type: 'item' },
+  periode:         { pid: 'P2348', label: msg('attr-periode'),              type: 'item' },
+  memperingati:    { pid: 'P547',  label: msg('attr-memperingati'),         type: 'item' },
+  pencipta:        { pid: 'P170',  label: msg('attr-pencipta'),             type: 'item' },
+  pelukis:         { pid: 'P170',  label: msg('attr-pelukis'),              type: 'item' },
+  tinggi:          { pid: 'P2048', label: msg('attr-tinggi'),               type: 'quantity', unit: Q_METER, unitLabel: 'm' },
+  jumlahKamar:     { pid: 'P8733', label: msg('attr-jumlah-kamar'),         type: 'quantity' },
+  operator:        { pid: 'P137',  label: msg('attr-operator'),             type: 'item' },
+  pengelola:       { pid: 'P137',  label: msg('attr-pengelola'),            type: 'item' },
+  penghuni:        { pid: 'P466',  label: msg('attr-penghuni'),             type: 'item' },
+  penghuniKlub:    { pid: 'P466',  label: msg('attr-penghuni-klub'),        type: 'item' },
+  luas:            { pid: 'P2046', label: msg('attr-luas'),                 type: 'quantity', unit: Q_KM2, unitLabel: 'km²' },
+  ranjang:         { pid: 'P6801', label: msg('attr-ranjang'),              type: 'quantity' },
+  pelajar:         { pid: 'P2196', label: msg('attr-pelajar'),              type: 'quantity', suffix: msg('unit-people') },
+  permukaan:       { pid: 'P765',  label: msg('attr-permukaan'),            type: 'item' },
+  rektor:          { pid: 'P1037', label: msg('attr-rektor'),               type: 'item' },
+  iata:            { pid: 'P238',  label: msg('attr-iata'),                 type: 'string' },
+  icao:            { pid: 'P239',  label: msg('attr-icao'),                 type: 'string' },
+  ketinggian:      { pid: 'P2044', label: msg('attr-ketinggian'),           type: 'quantity', unit: Q_METER, unitLabel: msg('unit-masl') },
+  jalur:           { pid: 'P81',   label: msg('attr-jalur'),                type: 'item' },
+  perairan:        { pid: 'P206',  label: msg('attr-perairan'),             type: 'item' },
+  perairanSungai:  { pid: 'P206',  label: msg('attr-perairan-sungai'),      type: 'item' },
+  iucn:            { pid: 'P814',  label: msg('attr-iucn'),                 type: 'item' },
+  kedalaman:       { pid: 'P4511', label: msg('attr-kedalaman'),            type: 'quantity', unit: Q_METER, unitLabel: 'm' },
+  panjang:         { pid: 'P2043', label: msg('attr-panjang'),              type: 'quantity', unit: Q_METER, unitLabel: 'm' },
+  pegunungan:      { pid: 'P4552', label: msg('attr-pegunungan'),           type: 'item' },
+  prominensi:      { pid: 'P2660', label: msg('attr-prominensi'),           type: 'quantity', unit: Q_METER, unitLabel: 'm' },
+  bagianDari:      { pid: 'P361',  label: msg('attr-bagian-dari'),          type: 'item' },
+  penduduk:        { pid: 'P1082', label: msg('attr-penduduk'),             type: 'quantity', suffix: msg('unit-inhabitants') },
+  waktu:           { pid: 'P585',  label: msg('attr-waktu'),                type: 'time' },
+  magnitudo:       { pid: 'P2527', label: msg('attr-magnitudo'),            type: 'quantity' },
+  korban:          { pid: 'P1120', label: msg('attr-korban'),               type: 'quantity', suffix: msg('unit-inhabitants') },
+  penyebab:        { pid: 'P828',  label: msg('attr-penyebab'),             type: 'item' },
+  mulai:           { pid: 'P580',  label: msg('attr-mulai'),                type: 'time' },
+  berakhir:        { pid: 'P582',  label: msg('attr-berakhir'),             type: 'time' },
+  peserta:         { pid: 'P710',  label: msg('attr-peserta'),              type: 'item' },
+  latar:           { pid: 'P840',  label: msg('attr-latar'),                type: 'item' },
+  penulis:         { pid: 'P50',   label: msg('attr-penulis'),              type: 'item' },
+  genre:           { pid: 'P136',  label: msg('attr-genre'),                type: 'item' },
+  subjek:          { pid: 'P921',  label: msg('attr-subjek'),               type: 'item' },
+  kepalaDaerah:    { pid: 'P6',    label: msg('attr-kepala-daerah'),        type: 'item' },
+  tempatLahir:     { pid: 'P19',   label: msg('attr-tempat-lahir'),         type: 'item' },
+  tanggalLahir:    { pid: 'P569',  label: msg('attr-tanggal-lahir'),        type: 'time' },
+  pekerjaan:       { pid: 'P106',  label: msg('attr-pekerjaan'),            type: 'item' },
+  tanggalWafat:    { pid: 'P570',  label: msg('attr-tanggal-wafat'),        type: 'time' },
+  berasalDari:     { pid: 'P2341', label: msg('attr-berasal-dari'),         type: 'item' },
+  penutur:         { pid: 'P1098', label: msg('attr-penutur'),              type: 'quantity', suffix: msg('unit-people') },
+  statusUnesco:    { pid: 'P1999', label: msg('attr-status-unesco'),        type: 'item' },
+  negaraAsal:      { pid: 'P495',  label: msg('attr-negara-asal'),          type: 'item' },
+  caraBuat:        { pid: 'P2079', label: msg('attr-cara-buat'),            type: 'item' },
+  waktuPelaksanaan:{ pid: 'P837',  label: msg('attr-waktu-pelaksanaan'),    type: 'item' },
 };
 
-// Nama kategori harus sama persis dengan label di KATEGORI_DATA (app/utils/wikidata.py)
+// Kunci = nama klaster (bahasa Indonesia) di KATEGORI_DATA (app/utils/wikidata.py), bukan label terjemahan
 const SKEMA_KATEGORI = (A => ({
   // Umum
   'Kabupaten dan kota':          [A.penduduk, A.luas, A.kepalaDaerah, A.didirikan, A.laman],
@@ -752,15 +771,15 @@ async function _wbGet(params, signal) {
   return resp.json();
 }
 
-/** Label (id → en → mul → QID) untuk banyak QID sekaligus. */
+/** Label (bahasa antarmuka → id → en → mul → QID) untuk banyak QID sekaligus. */
 async function fetchLabels(qids, signal) {
   const labels = {};
   await Promise.all(chunkArray(qids, 50).map(async chunk => {
     const data = await _wbGet({
-      action: 'wbgetentities', ids: chunk.join('|'), props: 'labels', languages: 'id|en|mul',
+      action: 'wbgetentities', ids: chunk.join('|'), props: 'labels', languages: WD_LANGS.join('|'),
     }, signal);
     Object.entries(data.entities || {}).forEach(([id, e]) => {
-      labels[id] = e.labels?.id?.value || e.labels?.en?.value || e.labels?.mul?.value || id;
+      labels[id] = pickLang(e.labels) || id;
     });
   }));
   return labels;
@@ -788,7 +807,7 @@ function _qualifierYear(claim, pid) {
 /** Format angka quantity + satuan + tahun (kualifikator P585) untuk tampilan. */
 function formatQuantity(claim, attr, labels) {
   const v      = claim.mainsnak.datavalue.value;
-  const angka  = parseFloat(v.amount).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+  const angka  = formatNumber(parseFloat(v.amount), { maximumFractionDigits: 2 });
   const unit   = _unitQid(v.unit);
   const satuan = !unit ? (attr.suffix || '')
     : unit === attr.unit && attr.unitLabel ? attr.unitLabel
@@ -825,7 +844,7 @@ function formatAttrValues(claims, skema, labels) {
     // "nilai tidak diketahui" / "tidak ada nilai" tetap dihitung terisi
     const withValue = list.filter(c => c.mainsnak.snaktype === 'value');
     if (!withValue.length) {
-      values[attr.pid] = { text: list[0].mainsnak.snaktype === 'novalue' ? 'tidak ada' : 'tidak diketahui' };
+      values[attr.pid] = { text: msg(list[0].mainsnak.snaktype === 'novalue' ? 'value-none' : 'value-unknown') };
       return;
     }
 
@@ -859,10 +878,10 @@ function formatAttrValues(claims, skema, labels) {
 async function fetchDetailProps(qid, klasterNama, signal) {
   const skema = skemaKategori(klasterNama);
   const data = await _wbGet({
-    action: 'wbgetentities', ids: qid, props: 'claims|sitelinks/urls', sitefilter: 'idwikibooks',
+    action: 'wbgetentities', ids: qid, props: 'claims|sitelinks/urls', sitefilter: `${WIKI_LANG}wikibooks`,
   }, signal);
   const entity = data.entities?.[qid];
-  if (!entity) throw new Error('Butir tidak ditemukan');
+  if (!entity) throw new Error(msg('item-not-found'));
 
   const claims = entity.claims || {};
   const p31    = bestRankClaims(claims.P31);
@@ -879,7 +898,7 @@ async function fetchDetailProps(qid, klasterNama, signal) {
   return {
     tipe,
     values: formatAttrValues(claims, skema, labels),
-    wikibooks: entity.sitelinks?.idwikibooks?.url || null,
+    wikibooks: entity.sitelinks?.[`${WIKI_LANG}wikibooks`]?.url || null,
   };
 }
 
@@ -893,13 +912,13 @@ async function searchWilayah(term, signal) {
   const q = `SELECT ?item ?itemLabel ?itemDescription ?negara WHERE {
     SERVICE wikibase:mwapi {
       bd:serviceParam wikibase:api "EntitySearch" ; wikibase:endpoint "www.wikidata.org" ;
-                      mwapi:search ${JSON.stringify(term)} ; mwapi:language "id" ; mwapi:limit "30" .
+                      mwapi:search ${JSON.stringify(term)} ; mwapi:language ${JSON.stringify(I18N.lang)} ; mwapi:limit "30" .
       ?item wikibase:apiOutputItem mwapi:item .
       ?ordinal wikibase:apiOrdinal true .
     }
     ?item wdt:P31/wdt:P279* wd:Q56061 .
     OPTIONAL { ?item wdt:P17 ?negara . }
-    SERVICE wikibase:label { bd:serviceParam wikibase:language "id,en,mul" . }
+    SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}" . }
   } ORDER BY ?ordinal`;
   const rows = await sparqlPost(q, signal);
   const seen = new Set();
@@ -920,7 +939,7 @@ async function searchWilayah(term, signal) {
 
 async function searchWikidataItems(term, signal) {
   const data = await _wbGet({
-    action: 'wbsearchentities', search: term, language: 'id', uselang: 'id',
+    action: 'wbsearchentities', search: term, language: I18N.lang, uselang: I18N.lang,
     type: 'item', limit: 7,
   }, signal);
   return (data.search || []).map(s => ({ id: s.id, label: s.label || s.id, description: s.description || '' }));

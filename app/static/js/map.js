@@ -58,12 +58,12 @@ function mapInit(onMarkerClick) {
 
   const cartoTiles = L.tileLayer(
     'https://{s}.basemaps.cartocdn.com/rastertiles/voyager_labels_under/{z}/{x}/{y}.png?key=cb1_2xq9_1_82a33e4057c84236e108e347',
-    { attribution: 'Peta © <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM contributors</a>, <a href="https://carto.com/" target="_blank">CARTO</a>', maxZoom: 18 }
+    { attribution: `${escHtml(msg('map-attribution'))} © <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM contributors</a>, <a href="https://carto.com/" target="_blank">CARTO</a>`, maxZoom: 18 }
   ).addTo(_map);
 
   const osmTiles = L.tileLayer(
     'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    { attribution: 'Peta © <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM contributors</a>', maxZoom: 18 }
+    { attribution: `${escHtml(msg('map-attribution'))} © <a href="https://www.openstreetmap.org/copyright" target="_blank">OSM contributors</a>`, maxZoom: 18 }
   );
 
   L.control.layers(
@@ -81,7 +81,7 @@ function mapInit(onMarkerClick) {
       position: 'bottomright',
       showCompass: false,
       showPopup: false,
-      strings: { title: 'Lokasi saya' },
+      strings: { title: msg('map-my-location') },
       icon: 'icon-gps',
     }).addTo(_map);
   }
@@ -100,8 +100,8 @@ function mapInit(onMarkerClick) {
   legenda.onAdd = () => {
     const el = L.DomUtil.create('div', 'map-legend');
     el.innerHTML = `
-      <span class="map-legend-item"><i style="background:${MARKER_WARNA.default.fill}"></i>Ada foto</span>
-      <span class="map-legend-item"><i style="background:${MARKER_WARNA.tanpaFoto.fill}"></i>Belum ada foto</span>`;
+      <span class="map-legend-item"><i style="background:${MARKER_WARNA.default.fill}"></i>${escHtml(msg('map-legend-photo'))}</span>
+      <span class="map-legend-item"><i style="background:${MARKER_WARNA.tanpaFoto.fill}"></i>${escHtml(msg('detail-no-photo'))}</span>`;
     return el;
   };
   legenda.addTo(_map);

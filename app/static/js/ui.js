@@ -2,10 +2,37 @@
 
 /* ==========================================================================
    ui.js — Helper UI bersama untuk semua halaman (Jelajah & Perkaya):
-   escaping, dialog, combobox, dan saran butir Wikidata.
+   terjemahan, escaping, dialog, combobox, dan saran butir Wikidata.
    ========================================================================== */
 
 const $ = id => document.getElementById(id);
+
+// ---------------------------------------------------------------------------
+// TERJEMAHAN — pesan dari i18n/*.json, disisipkan server di base.html (I18N)
+// Sintaks: $1 parameter, {{PLURAL:$1|satu|banyak}}, {{formatnum:$1}} angka.
+// ---------------------------------------------------------------------------
+const _banana = new Banana(I18N.lang, { messages: { [I18N.lang]: I18N.messages } });
+
+/** Teks pesan polos. Hasilnya harus di-escape bila dimasukkan ke innerHTML. */
+function msg(key, ...params) {
+  return _banana.i18n(key, ...params);
+}
+
+/**
+ * Pesan sebagai HTML aman: teks pesan & parameter biasa di-escape; parameter
+ * berbentuk { html: '…' } disisipkan apa adanya (mis. tautan atau <strong>).
+ */
+function msgHtml(key, ...params) {
+  const html = [];
+  const args = params.map(p => (p && typeof p === 'object' && 'html' in p)
+    ? `\u0001${html.push(p.html) - 1}\u0001` : p);
+  return escHtml(msg(key, ...args)).replace(/\u0001(\d+)\u0001/g, (_, i) => html[i]);
+}
+
+/** Angka sesuai bahasa antarmuka (pemisah ribuan/desimal). */
+function formatNumber(n, opts) {
+  return Number(n).toLocaleString(I18N.lang, opts);
+}
 
 function escHtml(str) {
   return String(str ?? '')
@@ -16,7 +43,7 @@ function escHtml(str) {
 // ---------------------------------------------------------------------------
 // DIALOG — global agar map.js bisa akses
 // ---------------------------------------------------------------------------
-function appShowDialog(html, type = 'alert', title = 'Pesan') {
+function appShowDialog(html, type = 'alert', title = msg('dialog-message')) {
   const overlay = $('dialog-overlay');
   if (!overlay) { alert(title + '\n' + html.replace(/<[^>]+>/g, '')); return; }
   const titleEl = overlay.querySelector('.dialog-title') || $('dialog-title');
@@ -40,7 +67,7 @@ function _normalize(str) {
   return str.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 }
 
-function enhanceSearchableSelect(select, placeholder = 'Ketik atau pilih…') {
+function enhanceSearchableSelect(select, placeholder = msg('combo-placeholder')) {
   const wrap  = document.createElement('div');
   const input = document.createElement('input');
   const list  = document.createElement('ul');
@@ -96,7 +123,7 @@ function enhanceSearchableSelect(select, placeholder = 'Ketik atau pilih…') {
           lastGroup = e.group;
           return `${header}<li class="combo-option${i === active ? ' active' : ''}" role="option" data-i="${i}">${escHtml(e.label)}</li>`;
         }).join('')
-      : '<li class="combo-empty">Tidak ditemukan</li>';
+      : `<li class="combo-empty">${escHtml(msg('not-found'))}</li>`;
   };
 
   const setActive = i => {
@@ -198,7 +225,7 @@ function attachItemSuggest(input, list) {
                 <span class="prop-suggest-qid">${escHtml(it.id)}</span>
                 ${it.description ? `<span class="prop-suggest-desc">${escHtml(it.description)}</span>` : ''}
               </li>`).join('')
-          : '<li class="prop-suggest-empty">Tidak ditemukan</li>';
+          : `<li class="prop-suggest-empty">${escHtml(msg('not-found'))}</li>`;
         list.classList.remove('hidden');
       } catch (err) {
         if (err.name !== 'AbortError') list.classList.add('hidden');
@@ -221,11 +248,11 @@ function attachItemSuggest(input, list) {
 }
 
 // ---------------------------------------------------------------------------
-// DROPDOWN PROFIL di top nav (mobile)
+// DROPDOWN di top nav: profil & pilih bahasa
 // ---------------------------------------------------------------------------
-function initTopNavMenu() {
-  const toggle = $('top-nav-menu-toggle');
-  const menu   = $('top-nav-menu');
+function initTopNavMenu(toggleId, menuId) {
+  const toggle = $(toggleId);
+  const menu   = $(menuId);
   if (!toggle || !menu) return;
 
   const setOpen = open => {
@@ -233,12 +260,9 @@ function initTopNavMenu() {
     toggle.setAttribute('aria-expanded', String(open));
   };
 
-  toggle.addEventListener('click', e => {
-    e.stopPropagation();
-    setOpen(menu.classList.contains('hidden'));
-  });
+  toggle.addEventListener('click', () => setOpen(menu.classList.contains('hidden')));
   document.addEventListener('click', e => {
-    if (!menu.contains(e.target)) setOpen(false);
+    if (!menu.contains(e.target) && !toggle.contains(e.target)) setOpen(false);
   });
   document.addEventListener('keydown', e => {
     if (e.key === 'Escape' && !menu.classList.contains('hidden')) { setOpen(false); toggle.focus(); }
@@ -250,7 +274,8 @@ function initTopNavMenu() {
 // ---------------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('load', () => $('preloader')?.classList.add('hidden'));
-  initTopNavMenu();
+  initTopNavMenu('top-nav-menu-toggle', 'top-nav-menu');
+  initTopNavMenu('top-nav-lang-toggle', 'top-nav-lang-menu');
 
   $('dialog-overlay')?.addEventListener('click', e => {
     if (!e.target.closest('.dialog-box')) $('dialog-overlay').classList.add('hidden');

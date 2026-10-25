@@ -21,22 +21,22 @@
      SEKSI: LANDING (Eksplorasi)
      ------------------------------------------------------- #}
   <section id="panel-landing" class="panel-section">
-    <h2>Mulai Eksplorasi</h2>
+    <h2>{{ msg('explore-start') }}</h2>
 
     {# 1. Pilih tipe wilayah #}
     <div class="form-group">
-      <label class="form-label" for="select-wilayah-tipe">Tentukan Wilayah</label>
+      <label class="form-label" for="select-wilayah-tipe">{{ msg('region-type') }}</label>
       <select id="select-wilayah-tipe" class="form-select">
-        <option value="provinsi" selected>Provinsi di Indonesia</option>
-        <option value="all">Seluruh Indonesia</option>
-        <option value="luar_negeri">Luar Negeri</option>
-        <option value="qid">Q-ID wilayah (kota, kabupaten, kecamatan…)</option>
+        <option value="provinsi" selected>{{ msg('region-type-province') }}</option>
+        <option value="all">{{ msg('region-type-all') }}</option>
+        <option value="luar_negeri">{{ msg('region-type-abroad') }}</option>
+        <option value="qid">{{ msg('region-type-qid') }}</option>
       </select>
     </div>
 
     {# 2a. Dropdown provinsi #}
     <div id="wadah-provinsi" class="form-group">
-      <label class="form-label" for="select-provinsi">Pilih Provinsi</label>
+      <label class="form-label" for="select-provinsi">{{ msg('region-province-choose') }}</label>
       <select id="select-provinsi" class="form-select">
         {% for value, label in wilayah_provinsi %}
         <option value="{{ value }}">{{ label }}</option>
@@ -46,10 +46,10 @@
 
     {# 2b. Dropdown luar negeri — dirender server-side sebagai optgroup #}
     <div id="wadah-luar-negeri" class="form-group hidden">
-      <label class="form-label" for="select-negara">Pilih Negara</label>
+      <label class="form-label" for="select-negara">{{ msg('region-country-choose') }}</label>
       <select id="select-negara" class="form-select">
         {% for benua, negara_list in wilayah_luar_negeri.items() %}
-        <optgroup label="{{ benua|capitalize }}">
+        <optgroup label="{{ msg('continent-' + benua) }}">
           {% for value, label in negara_list %}
           <option value="{{ value }}">{{ label }}</option>
           {% endfor %}
@@ -60,28 +60,28 @@
 
     {# 2c. Q-ID wilayah bebas — kota/kabupaten/kecamatan/desa, di mana pun #}
     <div id="wadah-qid-wilayah" class="form-group hidden">
-      <label class="form-label" for="input-qid-wilayah">Cari Wilayah</label>
+      <label class="form-label" for="input-qid-wilayah">{{ msg('region-search') }}</label>
       <div class="prop-edit-field wilayah-field">
         <input type="text" id="input-qid-wilayah" class="form-input"
-               placeholder="Ketik nama (mis. Padang) atau Q-ID (wd:Q11477)" autocomplete="off" spellcheck="false"
+               placeholder="{{ msg('region-search-placeholder') }}" autocomplete="off" spellcheck="false"
                role="combobox" aria-autocomplete="list" aria-controls="qid-wilayah-suggest">
         <ul id="qid-wilayah-suggest" class="prop-suggest hidden" role="listbox"></ul>
       </div>
-      <small id="qid-wilayah-info" class="qid-wilayah-info">Ketik nama kota, kabupaten, atau kecamatan, lalu pilih dari daftar.</small>
+      <small id="qid-wilayah-info" class="qid-wilayah-info">{{ msg('region-search-hint') }}</small>
     </div>
 
     {# 3. Kategori data #}
     <div class="form-group">
-      <label class="form-label" for="select-kategori">Pilih Kategori Data</label>
+      <label class="form-label" for="select-kategori">{{ msg('category-choose') }}</label>
       <select id="select-kategori" class="form-select">
-        <option disabled selected value="">— Pilih kategori —</option>
+        <option disabled selected value="">— {{ msg('category-placeholder') }} —</option>
         {% for group in kategori_data %}
           {% if group.group %}
-          <optgroup label="{{ group.group }}">
+          <optgroup label="{{ msg(group.group) }}">
           {% endif %}
-          {% for value, label, attrs in group['items'] %}
-          <option value="{{ value }}"
-            {% for k, v in attrs.items() %}{{ k }}="{{ v }}" {% endfor %}>{{ label }}</option>
+          {% for value, klaster, key, attrs in group['items'] %}
+          <option value="{{ value }}" data-klaster="{{ klaster }}"
+            {% for k, v in attrs.items() %}{{ k }}="{{ v }}" {% endfor %}>{{ msg(key) }}</option>
           {% endfor %}
           {% if group.group %}
           </optgroup>
@@ -92,13 +92,13 @@
 
     {# Q-ID — terisi otomatis dari pilihan kategori, atau isi manual jika "Ketik Q-ID Sendiri" #}
     <div class="form-group" id="wadah-qid">
-      <label class="form-label" for="input-qid">Q-ID Wikidata</label>
+      <label class="form-label" for="input-qid">{{ msg('qid-label') }}</label>
       <input type="text" id="input-qid" class="form-input qid-input" readonly
-             placeholder="Pilih kategori di atas…">
+             placeholder="{{ msg('qid-placeholder') }}">
     </div>
 
     <button id="btn-jelajahi" class="btn btn--primary btn--full btn--large">
-      Jelajahi
+      {{ msg('explore-button') }}
     </button>
   </section>
 
@@ -112,8 +112,8 @@
     {# Status bar loading — disembunyikan setelah selesai #}
     <div id="hasil-loading-bar" class="hasil-loading-bar hidden">
       <div class="loader loader--small"></div>
-      <span id="hasil-loading-text">Menarik data…</span>
-      <button id="btn-batalkan" class="btn-batalkan-kecil">Batalkan</button>
+      <span id="hasil-loading-text">{{ msg('loading-data') }}</span>
+      <button id="btn-batalkan" class="btn-batalkan-kecil">{{ msg('button-abort') }}</button>
     </div>
 
     {# Catatan bila hasil tidak lengkap (dihentikan pengguna / galat di tengah) #}
@@ -122,30 +122,30 @@
     <div class="filter-header">
       <div class="filter-row">
         <select id="filter-wilayah" class="form-select">
-          <option value="all">Semua Wilayah</option>
+          <option value="all">{{ msg('filter-all-regions') }}</option>
         </select>
         <select id="filter-urut" class="form-select"></select>
       </div>
       <div class="feature-btns">
-        <button class="feature-btn loading" id="btn-jelajahi-artikel" data-filter="article">Jelajahi Artikel</button>
-        <button class="feature-btn loading" id="btn-jelajahi-gambar"  data-filter="image">Jelajahi Gambar</button>
-        <button class="feature-btn loading" id="btn-semua-hasil"      data-filter="all">Semua Hasil</button>
+        <button class="feature-btn loading" id="btn-jelajahi-artikel" data-filter="article">{{ msg('filter-articles') }}</button>
+        <button class="feature-btn loading" id="btn-jelajahi-gambar"  data-filter="image">{{ msg('filter-images') }}</button>
+        <button class="feature-btn loading" id="btn-semua-hasil"      data-filter="all">{{ msg('filter-all-results') }}</button>
       </div>
-      <!-- <a href="{{ url_for('main.perkaya') }}" id="btn-perkaya" class="perkaya-bridge">✨ Perkaya data ini dengan AI →</a> -->
+      {# <a href="{{ url_for('main.perkaya') }}" id="btn-perkaya" class="perkaya-bridge">✨ {{ msg('enrich-bridge') }} →</a> #}
     </div>
 
     <input type="search" id="search-input" class="search-input"
-           placeholder="Menghitung data…" autocomplete="off">
+           placeholder="{{ msg('search-counting') }}" autocomplete="off">
 
     <div id="hasil-container">
       <div id="loading-center" class="loading-state hidden">
         <div class="loader loader--center"></div>
-        <p class="loading-title" id="loading-center-text">Menarik data…</p>
+        <p class="loading-title" id="loading-center-text">{{ msg('loading-data') }}</p>
         <p class="loading-subtitle" id="loading-center-sub"></p>
         {# Muncul setelah data mencapai CUKUPKAN_MIN_DATA (main.js) #}
         <div id="cukupkan-wrap" class="hidden">
-          <button id="btn-cukupkan" type="button" class="btn btn--secondary btn--sm btn-cukupkan">Cukupkan pencarian</button>
-          <p class="loading-subtitle">Hentikan penarikan dan tampilkan data yang sudah tertarik.</p>
+          <button id="btn-cukupkan" type="button" class="btn btn--secondary btn--sm btn-cukupkan">{{ msg('stop-search') }}</button>
+          <p class="loading-subtitle">{{ msg('stop-search-hint') }}</p>
         </div>
       </div>
       <ol id="hasil-list" class="result-list"></ol>
@@ -161,37 +161,30 @@
      SEKSI: TENTANG
      ------------------------------------------------------- #}
   <section id="panel-about" class="panel-section hidden">
-    <p>
-      WikiJelajah adalah alat bantu untuk menjelajahi dan menyunting data tempat wisata di Indonesia
-      melalui Wikidata. Pengguna dapat mencari lokasi wisata, melihat detail informasinya, serta
-      menambah atau memperbarui data seperti label, deskripsi, gambar, dan atribut lainnya.
-    </p>
-    <p>
-      Data yang disunting melalui WikiJelajah langsung tersimpan ke Wikidata dan dapat dimanfaatkan
-      oleh seluruh proyek Wikimedia maupun aplikasi pihak ketiga yang menggunakan data terbuka.
-    </p>
+    <p>{{ msg('about-1') }}</p>
+    <p>{{ msg('about-2') }}</p>
   </section>
 
   {# --- Navigasi Bawah --- #}
-  <nav id="panel-nav" aria-label="Navigasi utama">
+  <nav id="panel-nav" aria-label="{{ msg('panel-nav') }}">
     {# Nav standar #}
     <ul id="nav-standar">
       <li class="text-left">
-        <a href="#" id="nav-beranda">Beranda</a>
+        <a href="#" id="nav-beranda">{{ msg('panel-home') }}</a>
       </li>
       <li class="text-center">
-        <a href="#" id="nav-hasil">Hasil</a>
+        <a href="#" id="nav-hasil">{{ msg('panel-results') }}</a>
       </li>
       <li class="text-right">
-        <a href="#" id="nav-tentang">Tentang</a>
+        <a href="#" id="nav-tentang">{{ msg('panel-about') }}</a>
       </li>
     </ul>
 
     {# Nav detail (saat membuka item) #}
     <ul id="nav-detail" class="hidden">
-      <li class="flex-1 text-left"><a id="btn-prev" class="cursor-pointer fw-bold">Sebelumnya</a></li>
-      <li class="flex-1 text-center"><a href="#" id="nav-kembali-hasil">Hasil</a></li>
-      <li class="flex-1 text-right"><a id="btn-next" class="cursor-pointer fw-bold">Selanjutnya</a></li>
+      <li class="flex-1 text-left"><a id="btn-prev" class="cursor-pointer fw-bold">{{ msg('panel-previous') }}</a></li>
+      <li class="flex-1 text-center"><a href="#" id="nav-kembali-hasil">{{ msg('panel-results') }}</a></li>
+      <li class="flex-1 text-right"><a id="btn-next" class="cursor-pointer fw-bold">{{ msg('panel-next') }}</a></li>
     </ul>
   </nav>
 
@@ -200,14 +193,14 @@
 {# =========================================================
    PETA
    ========================================================= #}
-<section id="map" aria-label="Peta interaktif"></section>
+<section id="map" aria-label="{{ msg('map-label') }}"></section>
 
 </div>{# /app-body #}
 
 {# Overlay & dialog mode game #}
 <div id="game-overlay" class="hidden" aria-hidden="true"></div>
 <div id="game-dialog" class="hidden" role="dialog" aria-modal="true">
-  <h3 id="game-title">Tantangan Game!</h3>
+  <h3 id="game-title">{{ msg('game-title') }}</h3>
   <p id="game-message"></p>
 </div>
 

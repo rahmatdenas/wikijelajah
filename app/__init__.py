@@ -14,6 +14,9 @@ def create_app(config_name='default'):
         # membuat tautan http:// dan callback OAuth tidak cocok.
         app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 
+    from . import i18n
+    i18n.init_app(app)
+
     from .auth import auth as auth_bp
     app.register_blueprint(auth_bp, url_prefix='/oauth')
 

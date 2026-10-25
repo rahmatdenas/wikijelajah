@@ -57,6 +57,26 @@ Buka browser di `http://localhost:5000` (atau port yang ditampilkan di terminal)
 - Edit label, deskripsi, dan properti langsung ke Wikidata (perlu login)
 - Upload foto ke Wikimedia Commons
 - Cache hasil pencarian di browser (sessionStorage)
+- Antarmuka multibahasa (Indonesia & Inggris), tombol pilih bahasa di bilah atas
+
+## Terjemahan (i18n)
+
+Semua teks antarmuka ada di folder `i18n/` dengan format pesan JSON MediaWiki
+(sama dengan [banana-i18n](https://github.com/wikimedia/banana-i18n) yang dipakai di browser):
+
+| File | Isi |
+|---|---|
+| `i18n/en.json` | Bahasa sumber (untuk [translatewiki.net](https://translatewiki.net)) |
+| `i18n/id.json` | Bahasa Indonesia (bahasa bawaan aplikasi) |
+| `i18n/qqq.json` | Penjelasan setiap pesan untuk penerjemah |
+
+- Di template Jinja: `{{ msg('kunci', param1, …) }}`; di JavaScript: `msg('kunci', …)`.
+  Pesan memakai `$1`, `{{PLURAL:$1|satu|banyak}}`, dan `{{formatnum:$1}}`.
+- Menambah pesan baru: tambahkan kuncinya ke `en.json`, `id.json`, dan `qqq.json` sekaligus.
+- Bahasa baru cukup dengan menambah file `i18n/<kode>.json` — otomatis muncul di tombol bahasa.
+  Pesan yang belum diterjemahkan jatuh ke bahasa Inggris (bahasa daerah Indonesia jatuh ke bahasa Indonesia dulu).
+- Bahasa dipilih dari `?uselang=xx`, lalu cookie tombol bahasa, lalu bahasa browser, lalu bahasa Indonesia.
+- Data dari Wikidata (label butir, nama provinsi/negara) dan ringkasan Wikipedia ikut bahasa yang dipilih.
 
 ## Deploy ke Toolforge
 

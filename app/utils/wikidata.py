@@ -1,5 +1,9 @@
 # Data statis referensi wilayah dan kategori untuk dropdown UI.
 # Dipisah dari template agar template tetap bersih.
+import time
+from concurrent.futures import ThreadPoolExecutor
+
+import requests
 
 WILAYAH_PROVINSI = [
     ('wd:Q1823', 'Aceh'),
@@ -129,117 +133,185 @@ WILAYAH_LUAR_NEGERI = {
     ],
 }
 
-# Kategori data untuk dropdown — setiap grup adalah (value, label, attr_dict)
+# Kategori data untuk dropdown — setiap butir adalah (value, klaster, kunci_pesan, attr_dict).
+# klaster = nama kategori dalam bahasa Indonesia yang dipakai sebagai kunci internal
+# (SKEMA_KATEGORI di wikidata.js, kolom kategori di DB Perkaya) — jangan diterjemahkan;
+# teks tampilannya diambil dari kunci_pesan (i18n/*.json), begitu pula nama grup.
 # attr_dict boleh kosong {} atau berisi data-* attributes tambahan
 KATEGORI_DATA = [
     {
         'group': None,
         'items': [
-            ('wd:Q3199141 wd:Q3191695', 'Kabupaten dan kota', {}),
-            ('wd:Q5', 'Tempat lahir tokoh', {'data-lokasi': 'P19', 'data-tahun': 'P569'}),
+            ('wd:Q3199141 wd:Q3191695', 'Kabupaten dan kota', 'category-regencies-cities', {}),
+            ('wd:Q5', 'Tempat lahir tokoh', 'category-birthplaces', {'data-lokasi': 'P19', 'data-tahun': 'P569'}),
         ],
     },
     {
-        'group': 'Budaya',
+        'group': 'category-group-culture',
         'items': [
-            ('wd:Q34770', 'Bahasa', {'data-kategori': 'alam', 'data-lokasi': 'P2341'}),
-            ('wd:Q36192', 'Budaya rakyat', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
-            ('wd:Q19861951 wd:Q746549 wd:Q2095 wd:Q8195619', 'Hidangan', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
-            ('wd:Q11460 wd:Q3172759 wd:Q28823', 'Pakaian', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
-            ('wd:Q189819 wd:Q2627975', 'Ritual dan upacara', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
-            ('wd:Q107357104 wd:Q184485', 'Tari dan pertunjukan', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
+            ('wd:Q34770', 'Bahasa', 'category-languages', {'data-kategori': 'alam', 'data-lokasi': 'P2341'}),
+            ('wd:Q36192', 'Budaya rakyat', 'category-folk-culture', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
+            ('wd:Q19861951 wd:Q746549 wd:Q2095 wd:Q8195619', 'Hidangan', 'category-dishes', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
+            ('wd:Q11460 wd:Q3172759 wd:Q28823', 'Pakaian', 'category-clothing', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
+            ('wd:Q189819 wd:Q2627975', 'Ritual dan upacara', 'category-rituals', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
+            ('wd:Q107357104 wd:Q184485', 'Tari dan pertunjukan', 'category-dances', {'data-kategori': 'alam', 'data-lokasi': 'P276'}),
         ],
     },
     {
-        'group': 'Tempat ibadah',
+        'group': 'category-group-worship',
         'items': [
-            ('wd:Q32815 wd:Q56235676 wd:Q56235673 wd:Q1454820', 'Masjid', {}),
-            ('wd:Q16970 wd:Q2977 wd:Q56242215', 'Gereja & katedral', {}),
-            ('wd:Q44539 wd:Q2736554 wd:Q842402 wd:Q3124902', 'Kuil & candi', {}),
-            ('wd:Q5393308 wd:Q2680845', 'Vihara & kelenteng', {}),
-        ],
-    },
-    {
-        'group': None,
-        'items': [
-            ('wd:Q11032 wd:Q41298', 'Media massa', {'data-lokasi': 'P291', 'data-tahun': 'P577'}),
-            ('wd:Q33506', 'Museum', {}),
-        ],
-    },
-    {
-        'group': 'Peninggalan sejarah',
-        'items': [
-            ('wd:Q220659 wd:Q860861 wd:Q193475', 'Artefak', {'data-lokasi': 'P276'}),
-            ('wd:Q57821 wd:Q1785071 wd:Q91122', 'Benteng dan bunker', {}),
-            ('wd:Q178743 wd:Q860861', 'Prasasti', {}),
-            ('wd:Q839954 wd:Q193475', 'Situs arkeologi lainnya', {}),
-            ('wd:Q4989906 wd:Q321053 wd:Q179700 wd:Q170980 wd:Q5003624', 'Monumen, patung, & memorial', {}),
-            ('wd:Q137894610 wd:Q35112127 wd:Q4246737 wd:Q19860854 wd:Q109607', 'Bangunan bersejarah lainnya', {}),
-            ('wd:Q41176 wd:Q811979', 'Bangunan secara umum dan struktur arsitektur', {}),
-        ],
-    },
-    {
-        'group': 'Bangunan/tempat',
-        'items': [
-            ('wd:Q27686 wd:Q875157', 'Hotel dan resor', {}),
-            ('wd:Q16560 wd:Q481289', 'Istana', {}),
-            ('wd:Q43501 wd:Q167346', 'Kebun binatang & tanaman', {'data-kategori': 'alam'}),
-            ('wd:Q570116', 'Objek wisata', {'data-kategori': 'alam', 'data-subclass': '1'}),
-            ('wd:Q330284 wd:Q11315', 'Pasar dan mall', {}),
-            ('wd:Q7075', 'Perpustakaan', {}),
-            ('wd:Q22746 wd:Q174782', 'Ruang terbuka hijau', {'data-kategori': 'alam'}),
-            ('wd:Q16917', 'Rumah sakit', {}),
-            ('wd:Q3914 wd:Q9842 wd:Q159334 wd:Q189004', 'Sekolah', {}),
-            ('wd:Q483110 wd:Q2310214', 'Stadion & lapangan olahraga', {}),
-            ('wd:Q3918 wd:Q38723', 'Universitas & kampus', {}),
-        ],
-    },
-    {
-        'group': 'Transportasi',
-        'items': [
-            ('wd:Q1248784', 'Bandar udara', {}),
-            ('wd:Q44782', 'Pelabuhan', {}),
-            ('wd:Q55488', 'Stasiun kereta api', {}),
-            ('wd:Q494829', 'Terminal bus', {}),
-        ],
-    },
-    {
-        'group': 'Bentang alam',
-        'items': [
-            ('wd:Q34038', 'Air terjun', {'data-kategori': 'alam'}),
-            ('wd:Q179049', 'Cagar alam', {'data-kategori': 'alam'}),
-            ('wd:Q23397 wd:Q204324 wd:Q159954', 'Danau & kaldera', {'data-kategori': 'alam'}),
-            ('wd:Q35509', 'Gua', {'data-kategori': 'alam'}),
-            ('wd:Q8502', 'Gunung', {'data-kategori': 'alam'}),
-            ('wd:Q40080', 'Pantai', {'data-kategori': 'alam'}),
-            ('wd:Q23442', 'Pulau', {'data-kategori': 'alam'}),
-            ('wd:Q131681 wd:Q12323', 'Waduk, bendungan, & embung', {'data-kategori': 'alam'}),
-        ],
-    },
-    {
-        'group': 'Peristiwa',
-        'items': [
-            ('wd:Q7944 wd:Q8070', 'Gempa bumi dan tsunami', {'data-lokasi': 'P276', 'data-tahun': 'P585'}),
-            ('wd:Q8065 wd:Q3839081 wd:Q7692360 wd:Q8068', 'Bencana lainnya', {'data-lokasi': 'P276', 'data-tahun': 'P585'}),
-            ('wd:Q1323212 wd:Q3199915 wd:Q198 wd:Q645883 wd:Q831663 wd:Q180684 wd:Q178561 wd:Q1261499', 'Perang & konflik', {'data-lokasi': 'P276', 'data-tahun': 'P585'}),
-            ('wd:Q1190554', 'Peristiwa lainnya', {'data-lokasi': 'P276', 'data-tahun': 'P585', 'data-subclass': '1'}),
-        ],
-    },
-    {
-        'group': 'Karya & literatur',
-        'items': [
-            ('wd:Q7725634', 'Latar karya sastra', {'data-lokasi': 'P840', 'data-tahun': 'P577'}),
-            ('wd:Q3305213', 'Lukisan', {'data-lokasi': 'P276', 'data-tahun': 'P571'}),
-            ('wd:Q1641020', 'Lontar', {'data-lokasi': 'P276'}),
-            ('wd:Q87167', 'Naskah', {'data-lokasi': 'P276'}),
-            ('wd:Q47461344 wd:Q7725634', 'Publikasi', {'data-lokasi': 'P291', 'data-tahun': 'P577'}),
+            ('wd:Q32815 wd:Q56235676 wd:Q56235673 wd:Q1454820', 'Masjid', 'category-mosques', {}),
+            ('wd:Q16970 wd:Q2977 wd:Q56242215', 'Gereja & katedral', 'category-churches', {}),
+            ('wd:Q44539 wd:Q2736554 wd:Q842402 wd:Q3124902', 'Kuil & candi', 'category-temples', {}),
+            ('wd:Q5393308 wd:Q2680845', 'Vihara & kelenteng', 'category-viharas', {}),
         ],
     },
     {
         'group': None,
         'items': [
-            ('apapun', 'Semua Jenis Objek', {}),
-            ('custom', 'Ketik Q-ID Sendiri…', {}),
+            ('wd:Q11032 wd:Q41298', 'Media massa', 'category-mass-media', {'data-lokasi': 'P291', 'data-tahun': 'P577'}),
+            ('wd:Q33506', 'Museum', 'category-museums', {}),
+        ],
+    },
+    {
+        'group': 'category-group-heritage',
+        'items': [
+            ('wd:Q220659 wd:Q860861 wd:Q193475', 'Artefak', 'category-artifacts', {'data-lokasi': 'P276'}),
+            ('wd:Q57821 wd:Q1785071 wd:Q91122', 'Benteng dan bunker', 'category-forts', {}),
+            ('wd:Q178743 wd:Q860861', 'Prasasti', 'category-inscriptions', {}),
+            ('wd:Q839954 wd:Q193475', 'Situs arkeologi lainnya', 'category-archaeological-sites', {}),
+            ('wd:Q4989906 wd:Q321053 wd:Q179700 wd:Q170980 wd:Q5003624', 'Monumen, patung, & memorial', 'category-monuments', {}),
+            ('wd:Q137894610 wd:Q35112127 wd:Q4246737 wd:Q19860854 wd:Q109607', 'Bangunan bersejarah lainnya', 'category-historic-buildings', {}),
+            ('wd:Q41176 wd:Q811979', 'Bangunan secara umum dan struktur arsitektur', 'category-buildings', {}),
+        ],
+    },
+    {
+        'group': 'category-group-places',
+        'items': [
+            ('wd:Q27686 wd:Q875157', 'Hotel dan resor', 'category-hotels', {}),
+            ('wd:Q16560 wd:Q481289', 'Istana', 'category-palaces', {}),
+            ('wd:Q43501 wd:Q167346', 'Kebun binatang & tanaman', 'category-zoos-gardens', {'data-kategori': 'alam'}),
+            ('wd:Q570116', 'Objek wisata', 'category-tourist-attractions', {'data-kategori': 'alam', 'data-subclass': '1'}),
+            ('wd:Q330284 wd:Q11315', 'Pasar dan mall', 'category-markets', {}),
+            ('wd:Q7075', 'Perpustakaan', 'category-libraries', {}),
+            ('wd:Q22746 wd:Q174782', 'Ruang terbuka hijau', 'category-parks', {'data-kategori': 'alam'}),
+            ('wd:Q16917', 'Rumah sakit', 'category-hospitals', {}),
+            ('wd:Q3914 wd:Q9842 wd:Q159334 wd:Q189004', 'Sekolah', 'category-schools', {}),
+            ('wd:Q483110 wd:Q2310214', 'Stadion & lapangan olahraga', 'category-stadiums', {}),
+            ('wd:Q3918 wd:Q38723', 'Universitas & kampus', 'category-universities', {}),
+        ],
+    },
+    {
+        'group': 'category-group-transport',
+        'items': [
+            ('wd:Q1248784', 'Bandar udara', 'category-airports', {}),
+            ('wd:Q44782', 'Pelabuhan', 'category-ports', {}),
+            ('wd:Q55488', 'Stasiun kereta api', 'category-train-stations', {}),
+            ('wd:Q494829', 'Terminal bus', 'category-bus-terminals', {}),
+        ],
+    },
+    {
+        'group': 'category-group-nature',
+        'items': [
+            ('wd:Q34038', 'Air terjun', 'category-waterfalls', {'data-kategori': 'alam'}),
+            ('wd:Q179049', 'Cagar alam', 'category-nature-reserves', {'data-kategori': 'alam'}),
+            ('wd:Q23397 wd:Q204324 wd:Q159954', 'Danau & kaldera', 'category-lakes', {'data-kategori': 'alam'}),
+            ('wd:Q35509', 'Gua', 'category-caves', {'data-kategori': 'alam'}),
+            ('wd:Q8502', 'Gunung', 'category-mountains', {'data-kategori': 'alam'}),
+            ('wd:Q40080', 'Pantai', 'category-beaches', {'data-kategori': 'alam'}),
+            ('wd:Q23442', 'Pulau', 'category-islands', {'data-kategori': 'alam'}),
+            ('wd:Q131681 wd:Q12323', 'Waduk, bendungan, & embung', 'category-reservoirs', {'data-kategori': 'alam'}),
+        ],
+    },
+    {
+        'group': 'category-group-events',
+        'items': [
+            ('wd:Q7944 wd:Q8070', 'Gempa bumi dan tsunami', 'category-earthquakes', {'data-lokasi': 'P276', 'data-tahun': 'P585'}),
+            ('wd:Q8065 wd:Q3839081 wd:Q7692360 wd:Q8068', 'Bencana lainnya', 'category-other-disasters', {'data-lokasi': 'P276', 'data-tahun': 'P585'}),
+            ('wd:Q1323212 wd:Q3199915 wd:Q198 wd:Q645883 wd:Q831663 wd:Q180684 wd:Q178561 wd:Q1261499', 'Perang & konflik', 'category-wars', {'data-lokasi': 'P276', 'data-tahun': 'P585'}),
+            ('wd:Q1190554', 'Peristiwa lainnya', 'category-other-events', {'data-lokasi': 'P276', 'data-tahun': 'P585', 'data-subclass': '1'}),
+        ],
+    },
+    {
+        'group': 'category-group-works',
+        'items': [
+            ('wd:Q7725634', 'Latar karya sastra', 'category-literary-settings', {'data-lokasi': 'P840', 'data-tahun': 'P577'}),
+            ('wd:Q3305213', 'Lukisan', 'category-paintings', {'data-lokasi': 'P276', 'data-tahun': 'P571'}),
+            ('wd:Q1641020', 'Lontar', 'category-lontars', {'data-lokasi': 'P276'}),
+            ('wd:Q87167', 'Naskah', 'category-manuscripts', {'data-lokasi': 'P276'}),
+            ('wd:Q47461344 wd:Q7725634', 'Publikasi', 'category-publications', {'data-lokasi': 'P291', 'data-tahun': 'P577'}),
+        ],
+    },
+    {
+        'group': None,
+        'items': [
+            ('apapun', 'Semua Jenis Objek', 'category-any', {}),
+            ('custom', 'Ketik Q-ID Sendiri…', 'category-custom', {}),
         ],
     },
 ]
+
+
+# ---------------------------------------------------------------------------
+# Nama provinsi & negara dalam bahasa antarmuka
+# Nama di atas berbahasa Indonesia. Untuk bahasa lain, label diambil dari
+# Wikidata (sekali per bahasa, disimpan di memori) sehingga semua bahasa
+# translatewiki otomatis mendapat nama wilayah tanpa perlu diterjemahkan manual.
+# ---------------------------------------------------------------------------
+_LABEL_TTL = 7 * 24 * 3600  # nama wilayah jarang berubah
+_LABEL_RETRY = 300       # bila Wikidata gagal, pakai nama Indonesia dan coba lagi 5 menit lagi
+_label_cache = {}        # lang → (kedaluwarsa, {QID: label})
+
+
+def _all_wilayah_qids():
+    qids = [v for v, _ in WILAYAH_PROVINSI]
+    qids += [v for negara in WILAYAH_LUAR_NEGERI.values() for v, _ in negara]
+    return [q.removeprefix('wd:') for q in qids]
+
+
+def _fetch_labels(lang, api_url, user_agent):
+    qids = _all_wilayah_qids()
+    chunks = [qids[i:i + 50] for i in range(0, len(qids), 50)]
+
+    def fetch(chunk):
+        resp = requests.get(api_url, params={
+            'action': 'wbgetentities', 'ids': '|'.join(chunk), 'props': 'labels',
+            'languages': lang, 'format': 'json',
+        }, headers={'User-Agent': user_agent}, timeout=10)
+        resp.raise_for_status()
+        return {qid: e['labels'][lang]['value']
+                for qid, e in resp.json().get('entities', {}).items() if lang in e.get('labels', {})}
+
+    labels = {}
+    with ThreadPoolExecutor(max_workers=len(chunks)) as pool:
+        for part in pool.map(fetch, chunks):
+            labels.update(part)
+    return labels
+
+
+def wilayah_labels(lang, api_url, user_agent):
+    """{QID: label} wilayah dalam bahasa `lang`; kosong untuk bahasa Indonesia atau bila gagal."""
+    if lang == 'id':
+        return {}
+    expires, labels = _label_cache.get(lang, (0, {}))
+    if time.time() < expires:
+        return labels
+    try:
+        labels, ttl = _fetch_labels(lang, api_url, user_agent), _LABEL_TTL
+    except (requests.RequestException, ValueError, KeyError):
+        ttl = _LABEL_RETRY
+    _label_cache[lang] = (time.time() + ttl, labels)
+    return labels
+
+
+def localized_wilayah(lang, api_url, user_agent):
+    """(provinsi, luar_negeri) seperti WILAYAH_*, dengan nama dalam bahasa `lang` dan urut ulang."""
+    labels = wilayah_labels(lang, api_url, user_agent)
+    if not labels:
+        return WILAYAH_PROVINSI, WILAYAH_LUAR_NEGERI
+
+    def relabel(pairs):
+        out = [(v, labels.get(v.removeprefix('wd:'), label)) for v, label in pairs]
+        return sorted(out, key=lambda p: p[1].casefold())
+
+    return relabel(WILAYAH_PROVINSI), {benua: relabel(n) for benua, n in WILAYAH_LUAR_NEGERI.items()}

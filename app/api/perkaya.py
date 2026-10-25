@@ -8,6 +8,7 @@ import requests
 from flask import current_app, jsonify, request, session
 
 from . import api
+from ..i18n import get_lang, msg
 from .routes import _get_authed_session, _get_csrf_token, _ua, login_required
 from ..utils import ai_search
 from ..utils.datavalue import DATATYPES, DataValueError, build_value, today_time_value
@@ -39,7 +40,7 @@ def perkaya_search():
     body = request.get_json(silent=True) or {}
     provider = body.get('provider', '')
     if provider not in ai_search.DEFAULT_MODELS:
-        return jsonify({'error': 'Penyedia AI tidak valid'}), 400
+        return jsonify({'error': msg('api-provider-invalid')}), 400
 
     item = body.get('item') or {}
     attr = body.get('attr') or {}
@@ -48,9 +49,9 @@ def perkaya_search():
     datatype = attr.get('type', '')
     unit = _clip(attr.get('unit'), 20)
     if not re.fullmatch(r'Q\d+', qid) or not re.fullmatch(r'P\d+', pid):
-        return jsonify({'error': 'Q-ID atau PID tidak valid'}), 400
+        return jsonify({'error': msg('api-qid-pid-invalid')}), 400
     if datatype not in DATATYPES or (unit and not re.fullmatch(r'Q\d+', unit)):
-        return jsonify({'error': 'Tipe data atau satuan tidak valid'}), 400
+        return jsonify({'error': msg('api-datatype-invalid')}), 400
 
     item_data = {
         'qid': qid,
@@ -63,14 +64,17 @@ def perkaya_search():
         'pid': pid,
         'label': _clip(attr.get('label'), 100) or pid,
         'type': datatype,
+        'unit': unit,
         'unit_label': _clip(attr.get('unit_label'), 20),
     }
     model = _clip(body.get('model'), 100) or ai_search.DEFAULT_MODELS[provider]
 
     try:
-        result = ai_search.search(provider, _clip(body.get('api_key'), 400), model, item_data, attr_data)
+        result = ai_search.search(provider, _clip(body.get('api_key'), 400), model, item_data, attr_data,
+                                  note_lang=get_lang())
     except ai_search.AISearchError as e:
-        return jsonify({'error': str(e)}), 502
+        # fatal: API key salah / kuota habis — browser menghentikan seluruh antrean
+        return jsonify({'error': str(e), 'fatal': e.fatal}), 502
 
     record = {
         'qid': qid, 'item_label': item_data['label'], 'kategori': item_data['kategori'],
@@ -92,13 +96,14 @@ def perkaya_search():
 
     if not options:
         if invalid:
-            record['note'] = f'AI memberi nilai "{invalid[0]}" yang formatnya tidak sesuai.'
+            record['note'] = msg('api-ai-invalid-format', invalid[0])
         return jsonify(save_cell_candidates(_username(), [{**record, 'status': 'not_found'}]))
 
     # Verifikasi semua sumber sekaligus (paralel) ke halaman aslinya
     jobs = [(value, src) for value, sources in options.items() for src in sources[:3]]
+    lang = get_lang()  # thread pekerja tidak punya konteks permintaan
     with ThreadPoolExecutor(max_workers=6) as pool:
-        checked = list(pool.map(lambda job: _verify_source(datatype, *job), jobs))
+        checked = list(pool.map(lambda job: _verify_source(datatype, *job, lang), jobs))
 
     records = []
     for value in options:
@@ -121,11 +126,11 @@ def perkaya_search():
     return jsonify(save_cell_candidates(_username(), records))
 
 
-def _verify_source(datatype, value, src):
+def _verify_source(datatype, value, src, lang):
     url = src['url']
     if 'vertexaisearch.cloud.google.com' in url:
         url = ai_search.resolve_url(url)  # tautan grounding Gemini adalah redirect
-    verification, verify_note = ai_search.verify(url, src['quote'], datatype, value)
+    verification, verify_note = ai_search.verify(url, src['quote'], datatype, value, lang)
     return {**src, 'url': url, 'verification': verification, 'verify_note': verify_note}
 
 
@@ -138,7 +143,7 @@ def _verify_source(datatype, value, src):
 def perkaya_candidates():
     statuses = STATUS_GROUPS.get(request.args.get('group', 'open'))
     if not statuses:
-        return jsonify({'error': 'Grup tidak valid'}), 400
+        return jsonify({'error': msg('api-group-invalid')}), 400
     return jsonify(list_candidates(_username(), statuses))
 
 
@@ -147,7 +152,7 @@ def perkaya_candidates():
 def perkaya_reject(cand_id):
     cand = get_candidate(_username(), cand_id)
     if not cand or cand['status'] != 'pending':
-        return jsonify({'error': 'Kandidat tidak ditemukan atau sudah diproses'}), 404
+        return jsonify({'error': msg('api-candidate-missing')}), 404
     return jsonify(update_candidate(_username(), cand_id, status='rejected'))
 
 
@@ -184,7 +189,7 @@ def perkaya_approve(cand_id):
     user = _username()
     cand = get_candidate(user, cand_id)
     if not cand or cand['status'] != 'pending':
-        return jsonify({'error': 'Kandidat tidak ditemukan atau sudah diproses'}), 404
+        return jsonify({'error': msg('api-candidate-missing')}), 404
 
     body = request.get_json(silent=True) or {}
     datatype = cand['datatype']
@@ -206,7 +211,7 @@ def perkaya_approve(cand_id):
     except (TypeError, ValueError):
         src_index = -1
     if sources and not 0 <= src_index < len(sources):
-        return jsonify({'error': 'Referensi yang dipilih tidak valid'}), 400
+        return jsonify({'error': msg('api-reference-invalid')}), 400
     ref_source = sources[src_index] if sources and sources[src_index].get('url') else None
 
     api_url = current_app.config['WIKIMEDIA_API_BASE']
@@ -220,9 +225,9 @@ def perkaya_approve(cand_id):
         }, headers=headers, timeout=15).json()
         existing = ent.get('entities', {}).get(qid, {}).get('claims', {}).get(pid)
     except (requests.RequestException, ValueError):
-        return jsonify({'error': 'Gagal memeriksa butir di Wikidata, coba lagi'}), 502
+        return jsonify({'error': msg('api-check-failed')}), 502
     if existing:
-        return jsonify({'error': f'{pid} pada {qid} sudah terisi di Wikidata. Tolak kandidat ini atau periksa butirnya.'}), 409
+        return jsonify({'error': msg('api-already-filled', pid, qid)}), 409
 
     oauth = _get_authed_session()
     chosen = ref_source or {}
@@ -237,9 +242,9 @@ def perkaya_approve(cand_id):
             'summary': summary,
         }, headers=headers, timeout=30).json()
     except (requests.RequestException, ValueError, KeyError) as e:
-        return jsonify({'error': f'Gagal menulis ke Wikidata: {e}'}), 502
+        return jsonify({'error': msg('api-write-failed', e)}), 502
     if 'error' in created:
-        return jsonify({'error': created['error'].get('info', 'Gagal menyimpan')}), 502
+        return jsonify({'error': created['error'].get('info', msg('save-failed'))}), 502
 
     claim_id = created.get('claim', {}).get('id')
     revid = created.get('pageinfo', {}).get('lastrevid')
@@ -255,7 +260,7 @@ def perkaya_approve(cand_id):
         except (requests.RequestException, ValueError) as e:
             ref = {'error': {'info': str(e)}}
         if 'error' in ref:
-            warning = f"Nilai tersimpan, tetapi referensi gagal ditambahkan: {ref['error'].get('info', '')}"
+            warning = msg('api-reference-failed', ref['error'].get('info', ''))
         else:
             revid = ref.get('pageinfo', {}).get('lastrevid', revid)
 
