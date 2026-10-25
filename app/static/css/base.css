@@ -342,15 +342,24 @@ input, textarea, select,
   to   { opacity: 1; }
 }
 
-/* --- Tautan halaman di samping logo --- */
-.top-nav-links { display: flex; gap: 2px; margin-right: auto; /* dorong bahasa & akun ke kanan */ }
-.top-nav-link {
-  padding: 5px var(--space-3); border-radius: var(--radius-sm);
-  color: rgba(255, 255, 255, 0.75); text-decoration: none;
-  font-size: var(--text-sm); font-weight: 600;
+/* --- Tautan halaman di samping logo (gaya tab: garis bawah pada halaman aktif) --- */
+.top-nav-links {
+  display: flex; align-self: stretch; gap: var(--space-1);
+  margin-left: var(--space-4); margin-right: auto;  /* dorong bahasa & akun ke kanan */
 }
-.top-nav-link:hover { color: var(--color-white); background: rgba(255, 255, 255, 0.1); }
-.top-nav-link.active { color: var(--color-white); background: rgba(255, 255, 255, 0.18); }
+.top-nav-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 var(--space-4);
+  border-bottom: 3px solid transparent; border-top: 3px solid transparent;
+  color: rgba(255, 255, 255, 0.8); text-decoration: none;
+  font-family: var(--font-ui); font-size: 14px; font-weight: 600; white-space: nowrap;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+.top-nav-link-icon { flex-shrink: 0; opacity: 0.85; }
+.top-nav-link:hover { color: var(--color-white); background: rgba(255, 255, 255, 0.08); }
+.top-nav-link.active { color: var(--color-white); border-bottom-color: var(--color-white); }
+.top-nav-link.active .top-nav-link-icon { opacity: 1; }
+.top-nav-link:focus-visible { outline: 2px solid var(--color-white); outline-offset: -4px; }
 .top-nav-link-short { display: none; }
 
 /* --- Dropdown profil di top nav --- */

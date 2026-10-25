@@ -176,7 +176,8 @@
 /* Top nav di layar sempit: cukup logo, tautan berlabel pendek tetap terlihat */
 @media (max-width: 800px) {
   .top-nav-title { display: none; }
-  .top-nav-link { padding: 5px var(--space-2); }
+  .top-nav-links { margin-left: var(--space-2); gap: 0; }
+  .top-nav-link { padding: 0 var(--space-2); font-size: 13px; gap: 5px; }
   .top-nav-link-full { display: none; }
   .top-nav-link-short { display: inline; }
 }

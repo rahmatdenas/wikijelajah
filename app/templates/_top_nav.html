@@ -5,6 +5,10 @@
    Profil Wikimedia & Keluar (login).
    Di layar sempit judul disembunyikan dan tautan memakai label pendek.
    ========================================================= #}
+{% set nav_icons = {
+  'main.index': '<path d="M15 5.1 9 3 3 5v16l6-2.1 6 2.1 6-2V3l-6 2.1zM10 5.47l4 1.4v11.66l-4-1.4V5.47zM5 6.46l3-1.01v11.7l-3 1.16V6.46zm14 11.08-3 1.01V6.86l3-1.16v11.84z"/>',
+  'main.perkaya': '<path d="m19 9 1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/>',
+} %}
 {% set nav_links = [
   ('main.index', msg('nav-explore'), msg('nav-explore')),
   ('main.perkaya', msg('nav-enrich'), msg('nav-enrich-short')),
@@ -21,6 +25,7 @@
     <a href="{{ url_for(endpoint) }}"
        class="top-nav-link{% if request.endpoint == endpoint %} active{% endif %}"
        {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>
+      <svg class="top-nav-link-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">{{ nav_icons[endpoint] | safe }}</svg>
       <span class="top-nav-link-full">{{ label }}</span>
       <span class="top-nav-link-short">{{ short }}</span>
     </a>
