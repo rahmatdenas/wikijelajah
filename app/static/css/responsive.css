@@ -176,14 +176,29 @@
 /* Top nav di layar sempit: cukup logo, tautan berlabel pendek tetap terlihat */
 @media (max-width: 800px) {
   .top-nav-title { display: none; }
-  .top-nav-links { margin-left: var(--space-2); gap: 0; }
-  .top-nav-link { padding: 0 var(--space-2); font-size: 13px; gap: 5px; }
+  .top-nav-links { margin-left: var(--space-2); }
+  .top-nav-link { padding: 5px var(--space-3); font-size: 13px; }
   .top-nav-link-full { display: none; }
   .top-nav-link-short { display: inline; }
+}
+
+/* HP: ikon tautan disembunyikan & tombol kanan dirapatkan agar semuanya muat */
+@media (max-width: 480px) {
+  #top-nav { gap: var(--space-2); }
+  .top-nav-auth { gap: var(--space-2); }
+  .top-nav-link-icon { display: none; }
+  .top-nav-link { padding: 5px 10px; }
+  .top-nav-user-link { padding: 5px var(--space-2); gap: var(--space-1); }
 }
 
 /* Tombol profil cukup ikon; nama pengguna pindah ke dalam menunya */
 @media (max-width: 480px) {
   .top-nav-username { display: none; }
   .top-nav-menu-user { display: block; }
+}
+
+/* HP sangat sempit (≤360px): rapatkan tepi & buang panah tombol bahasa */
+@media (max-width: 360px) {
+  #top-nav { padding: 0 var(--space-2); }
+  .top-nav-lang-toggle .top-nav-caret { display: none; }
 }

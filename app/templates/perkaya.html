@@ -84,7 +84,7 @@
   {# ---------------- Tab: Kelengkapan ---------------- #}
   <section id="pk-tab-kelengkapan" class="pk-panel">
     <div id="pk-empty" class="pk-empty">
-      <p>{{ msg_html('pk-empty-intro', ('<strong>' ~ (msg('pk-load') | e) ~ '</strong>') | safe) }}</p>
+      <p>{{ msg_html('pk-empty-intro', ('<strong>%s</strong>' | safe) % msg('pk-load')) }}</p>
     </div>
     <div id="pk-loading" class="pk-empty hidden">
       <div class="loader loader--small"></div>
@@ -100,7 +100,7 @@
         </div>
       </div>
       <div class="pk-legend">
-        <span>{{ msg_html('pk-legend-filled', ('<span class="pk-legend-value">' ~ (msg('pk-value') | e) ~ '</span>') | safe) }}</span>
+        <span>{{ msg_html('pk-legend-filled', ('<span class="pk-legend-value">%s</span>' | safe) % msg('pk-value')) }}</span>
         <span><b class="pk-cell-ico pk-ico--empty">○</b> {{ msg('pk-legend-empty') }}</span>
         <span><b class="pk-cell-ico pk-ico--pending">◐</b> {{ msg('pk-legend-pending') }}</span>
         <span><b class="pk-cell-ico pk-ico--notfound">–</b> {{ msg('pk-legend-notfound') }}</span>
