@@ -378,5 +378,5 @@ input, textarea, select,
 
 /* --- Tombol pilih bahasa --- */
 .top-nav-lang-toggle { font-size: var(--text-sm); font-weight: 600; }
-.top-nav-lang-code { display: none; text-transform: uppercase; }
+.top-nav-lang-code { text-transform: uppercase; }
 #top-nav-lang-menu { min-width: 170px; }

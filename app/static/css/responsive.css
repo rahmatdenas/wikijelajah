@@ -178,9 +178,6 @@
   .top-nav-links { display: none; }
   .top-nav-menu .top-nav-menu-item--page { display: block; }
   .top-nav-menu-item--sep { border-top: 1px solid var(--color-gray-200); }
-  /* Tombol bahasa cukup kode bahasanya (ID, EN) */
-  .top-nav-lang-name { display: none; }
-  .top-nav-lang-code { display: inline; }
 }
 
 /* Nama pengguna dipersingkat agar logo & judul tetap muat */
