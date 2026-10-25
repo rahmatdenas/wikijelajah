@@ -17,8 +17,9 @@
     <span class="top-nav-title">WikiJelajah</span>
   </a>
 
-  <div class="top-nav-auth">
-    {# Pilih bahasa — nama bahasa ditulis dalam bahasanya sendiri, tanpa bendera #}
+  {# Pilih bahasa — nama bahasa ditulis dalam bahasanya sendiri, tanpa bendera.
+     Tamu: di samping tombol Masuk; login: di samping tombol profil. #}
+  {% set lang_switcher %}
     <div class="top-nav-menu-wrap">
       <button type="button" id="top-nav-lang-toggle" class="top-nav-user-link top-nav-menu-toggle top-nav-lang-toggle"
               aria-haspopup="true" aria-expanded="false" aria-controls="top-nav-lang-menu"
@@ -41,7 +42,9 @@
         {% endfor %}
       </div>
     </div>
+  {% endset %}
 
+  <div class="top-nav-auth">
     {% if user %}
     <nav class="top-nav-links" aria-label="{{ msg('nav-pages') }}">
       {% for endpoint, label in nav_links %}
@@ -50,6 +53,7 @@
          {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ label }}</a>
       {% endfor %}
     </nav>
+    {{ lang_switcher }}
     <div class="top-nav-menu-wrap">
       <button type="button" id="top-nav-menu-toggle" class="top-nav-user-link top-nav-menu-toggle"
               aria-haspopup="true" aria-expanded="false" aria-controls="top-nav-menu">
@@ -75,6 +79,7 @@
       </div>
     </div>
     {% else %}
+    {{ lang_switcher }}
     <a href="{{ url_for('auth.login', next=request.full_path) }}" class="top-nav-btn top-nav-btn--login">
       <svg class="wikimedia-w" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.5 14.5l-3-8h1.5l1.8 5.2 1.8-5.2h1.5l1.8 5.2 1.8-5.2H18l-3 8-2-5.5-2 5.5z"/>
