@@ -342,15 +342,15 @@ input, textarea, select,
   to   { opacity: 1; }
 }
 
-/* --- Tautan halaman di samping logo (kontrol segmen: halaman aktif = pil putih) --- */
+/* --- Tautan halaman di samping logo (kontrol segmen: halaman aktif = kotak putih) --- */
 .top-nav-links {
   display: flex; gap: 2px; padding: 3px;
   margin-left: var(--space-4); margin-right: auto;  /* dorong bahasa & akun ke kanan */
-  background: rgba(0, 0, 0, 0.22); border-radius: 999px;
+  background: rgba(0, 0, 0, 0.22); border-radius: var(--radius-md);
 }
 .top-nav-link {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px var(--space-4); border-radius: 999px;
+  padding: 5px var(--space-4); border-radius: var(--radius-sm);
   color: rgba(255, 255, 255, 0.85); text-decoration: none;
   font-family: var(--font-ui); font-size: 13.5px; font-weight: 600; white-space: nowrap;
   transition: color var(--transition-fast), background-color var(--transition-fast);
