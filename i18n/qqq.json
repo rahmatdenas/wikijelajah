@@ -35,6 +35,7 @@
 	"link-photo-submit": "Button that links the Commons file to the Wikidata item.",
 	"nav-explore": "Top bar link to the main map page.",
 	"nav-enrich": "Top bar link to the page where missing Wikidata values are searched with AI.",
+	"nav-enrich-short": "Short form of the Enrich Data link, used in the top bar on small screens. Keep it very short.",
 	"nav-home-title": "Tooltip of the logo in the top bar.",
 	"nav-pages": "Accessible label of the page links in the top bar.",
 	"nav-profile": "Menu link to the user page of the logged-in user on mediawiki.org.",
