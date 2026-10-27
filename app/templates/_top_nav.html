@@ -1,36 +1,16 @@
 {# =========================================================
    TOP NAVIGATION BAR — dipakai semua halaman
-   Kiri: logo + tautan halaman (untuk semua orang, juga tamu).
-   Kanan: tombol bahasa + tombol Masuk (tamu) atau dropdown profil berisi
-   Profil Wikimedia & Keluar (login).
-   Di layar sempit judul disembunyikan dan tautan memakai label pendek.
+   Kiri: logo (kembali ke peta). Peta adalah halaman utama; Perkaya Data
+   dibuka dari hasil pencarian atau menu akun, membawa pencarian terakhir.
+   Kanan: Panduan + bahasa + Masuk (tamu) atau menu akun berisi
+   Perkaya Data, Profil Wikimedia & Keluar (login).
    ========================================================= #}
-{% set nav_icons = {
-  'main.index': '<path d="M15 5.1 9 3 3 5v16l6-2.1 6 2.1 6-2V3l-6 2.1zM10 5.47l4 1.4v11.66l-4-1.4V5.47zM5 6.46l3-1.01v11.7l-3 1.16V6.46zm14 11.08-3 1.01V6.86l3-1.16v11.84z"/>',
-  'main.enrich': '<path d="m19 9 1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/>',
-} %}
-{% set nav_links = [
-  ('main.index', msg('nav-explore'), msg('nav-explore')),
-  ('main.enrich', msg('nav-enrich'), msg('nav-enrich-short')),
-] %}
 <header id="top-nav">
-  <a href="{{ url_for('main.index') }}" class="top-nav-brand" title="{{ msg('nav-home-title') }}">
+  <a href="{{ url_for('main.index') }}" data-nav-context class="top-nav-brand" title="{{ msg('nav-home-title') }}">
     <img src="{{ url_for('static', filename='img/logobaru.png') }}"
          alt="" class="top-nav-logo">
     <span class="top-nav-title">WikiJelajah</span>
   </a>
-
-  <nav class="top-nav-links" aria-label="{{ msg('nav-pages') }}">
-    {% for endpoint, label, short in nav_links %}
-    <a href="{{ url_for(endpoint) }}"
-       class="top-nav-link{% if request.endpoint == endpoint %} active{% endif %}"
-       {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>
-      <svg class="top-nav-link-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">{{ nav_icons[endpoint] | safe }}</svg>
-      <span class="top-nav-link-full">{{ label }}</span>
-      <span class="top-nav-link-short">{{ short }}</span>
-    </a>
-    {% endfor %}
-  </nav>
 
   {# Pilih bahasa — nama bahasa ditulis dalam bahasanya sendiri, tanpa bendera.
      Tamu: di samping tombol Masuk; login: di samping tombol profil. #}
@@ -60,6 +40,13 @@
   {% endset %}
 
   <div class="top-nav-auth">
+    <button type="button" class="top-nav-user-link top-nav-help js-open-guide"
+            title="{{ msg('nav-help') }}" aria-label="{{ msg('nav-help') }}">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
+        <path d="M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z"/>
+      </svg>
+      <span class="top-nav-help-label">{{ msg('nav-help') }}</span>
+    </button>
     {% if user %}
     {{ lang_switcher }}
     <div class="top-nav-menu-wrap">
@@ -77,9 +64,11 @@
       <div id="top-nav-menu" class="top-nav-menu hidden" role="menu">
         {# Nama pengguna di dalam menu hanya tampil di layar sempit (tombolnya cukup ikon) #}
         <span class="top-nav-menu-user">{{ user.username }}</span>
+        <a href="{{ url_for('main.enrich') }}" data-nav-context role="menuitem"
+           class="top-nav-menu-item{% if request.endpoint == 'main.enrich' %} active{% endif %}">✨ {{ msg('nav-enrich') }}</a>
         <a href="https://www.mediawiki.org/wiki/User:{{ user.username | urlencode }}" role="menuitem"
            target="_blank" rel="noopener noreferrer"
-           class="top-nav-menu-item top-nav-menu-item--sep">{{ msg('nav-profile') }} ↗</a>
+           class="top-nav-menu-item">{{ msg('nav-profile') }} ↗</a>
         <a href="{{ url_for('auth.logout') }}" role="menuitem"
            class="top-nav-menu-item top-nav-menu-item--logout">{{ msg('nav-logout') }}</a>
       </div>

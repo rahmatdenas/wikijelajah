@@ -9,7 +9,7 @@
   {# Fonts #}
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Open+Sans:400,600,700|Merriweather:300,300i&display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Merriweather:ital,wght@0,300;0,400;1,300&display=swap">
 
   {# Leaflet #}
   <link rel="preconnect" href="https://unpkg.com">
@@ -131,6 +131,46 @@
   </div>
 </div>
 
+{# Panduan singkat — tombol "Panduan" di top nav; terbuka otomatis pada kunjungan pertama #}
+<div id="guide-modal" class="upload-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="guide-title">
+  <div class="upload-modal-box guide-box">
+    <div class="upload-modal-header">
+      <h3 id="guide-title">{{ msg('guide-title') }}</h3>
+      <button class="upload-modal-close js-guide-close" aria-label="{{ msg('button-close') }}">&times;</button>
+    </div>
+    <div class="upload-modal-body">
+      <p class="guide-intro">{{ msg('guide-intro') }}</p>
+      <ol class="guide-steps">
+        <li>
+          <span class="guide-step-num">1</span>
+          <div><strong>{{ msg('guide-explore-title') }}</strong><p>{{ msg('guide-explore-text') }}</p></div>
+        </li>
+        <li>
+          <span class="guide-step-num">2</span>
+          <div><strong>{{ msg('guide-detail-title') }}</strong><p>{{ msg('guide-detail-text') }}</p></div>
+        </li>
+        <li>
+          <span class="guide-step-num">3</span>
+          <div><strong>{{ msg('guide-contribute-title') }}</strong><p>{{ msg('guide-contribute-text') }}</p></div>
+        </li>
+      </ol>
+      <div class="guide-glossary">
+        <p class="guide-glossary-title">{{ msg('guide-glossary-title') }}</p>
+        <dl>
+          {% for term in ['wikidata', 'item', 'qid', 'attribute'] %}
+          <div><dt>{{ msg('guide-term-' + term) }}</dt><dd>{{ msg('guide-term-' + term + '-def') }}</dd></div>
+          {% endfor %}
+        </dl>
+      </div>
+    </div>
+    <div class="upload-modal-footer">
+      <button class="btn btn--primary js-guide-close">{{ msg('guide-start') }}</button>
+    </div>
+  </div>
+</div>
+
+{% if user %}{% include '_ai_settings.html' %}{% endif %}
+
 {# Leaflet JS #}
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/leaflet.locatecontrol/dist/L.Control.Locate.min.js" charset="utf-8"></script>
@@ -143,9 +183,10 @@
   const I18N = { lang: {{ lang | tojson }}, messages: {{ i18n_messages | tojson }} };
 </script>
 
-{# App JS — urutan penting: banana (i18n), ui, wikidata & map dulu, baru script halaman #}
+{# App JS — urutan penting: banana (i18n), ui, ai, wikidata & map dulu, baru script halaman #}
 <script src="{{ url_for('static', filename='js/vendor/banana-i18n.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ui.js') }}"></script>
+<script src="{{ url_for('static', filename='js/ai.js') }}"></script>
 <script src="{{ url_for('static', filename='js/wikidata.js') }}"></script>
 <script src="{{ url_for('static', filename='js/map.js') }}"></script>
 

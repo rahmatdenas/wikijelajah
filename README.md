@@ -51,7 +51,10 @@ Buka browser di `http://localhost:5000` (atau port yang ditampilkan di terminal)
 
 ## Fitur
 
-- Pencarian tempat berdasarkan kategori (museum, masjid, rumah sakit, dll) dan wilayah
+- Panduan singkat untuk pengguna baru (tombol **Panduan**, terbuka otomatis pada kunjungan pertama)
+- Pencarian tempat berdasarkan kategori (museum, masjid, rumah sakit, dll) dan wilayah dalam dua langkah, dengan pintasan kategori populer
+- Halaman Jelajah dan Perkaya Data saling terhubung: wilayah & kategori terakhir terbawa lewat URL
+  (`?region=province&province=Q3125978&category=museums`), sehingga hasil pencarian juga bisa dibagikan
 - Peta interaktif dengan marker cluster
 - Detail item: deskripsi, foto, koordinat, tautan Wikipedia/Wikidata
 - Edit label, deskripsi, dan properti langsung ke Wikidata (perlu login)

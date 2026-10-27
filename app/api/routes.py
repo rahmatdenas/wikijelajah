@@ -27,10 +27,9 @@ def _get_authed_session():
 
 
 def _get_session():
-    """Kembalikan OAuth session jika login, atau plain requests.Session jika anonim."""
-    if 'oauth_token' in session:
-        return _get_authed_session()
-    return requests.Session()
+    """OAuth session pengguna. Semua endpoint tulis wajib login (@login_required): tanpa itu
+    suntingan anonim akan tercatat atas IP server WikiJelajah, bukan IP pengunjung."""
+    return _get_authed_session()
 
 
 def _get_csrf_token(http_session, api_url):
@@ -85,6 +84,7 @@ def item_summary(qid):
 # ---------------------------------------------------------------------------
 
 @api.route('/item/<qid>/label', methods=['POST'])
+@login_required
 def update_label(qid):
     body = request.get_json(silent=True) or {}
     new_label = body.get('label', '').strip()
@@ -111,6 +111,7 @@ def update_label(qid):
 
 
 @api.route('/item/<qid>/description', methods=['POST'])
+@login_required
 def update_description(qid):
     body = request.get_json(silent=True) or {}
     new_desc = body.get('description', '').strip()
@@ -140,6 +141,7 @@ def update_description(qid):
 # ---------------------------------------------------------------------------
 
 @api.route('/item/<qid>/add-claim', methods=['POST'])
+@login_required
 def add_claim(qid):
     qid  = qid.upper()
     body = request.get_json(silent=True) or {}
@@ -159,6 +161,17 @@ def add_claim(qid):
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
     ua   = _ua()
     http = _get_session()
+
+    # Jangan menambah nilai kedua bila properti ini sudah terisi (mis. diisi orang lain sementara itu)
+    try:
+        ent = http.get(wikidata_api, params={
+            'action': 'wbgetentities', 'ids': qid, 'props': 'claims', 'format': 'json',
+        }, headers={'User-Agent': ua}, timeout=15).json()
+        existing = ent.get('entities', {}).get(qid, {}).get('claims', {}).get(prop)
+    except Exception:
+        return jsonify({'error': msg('api-check-failed')}), 502
+    if existing:
+        return jsonify({'error': msg('api-already-has-value', prop, qid)}), 409
 
     try:
         csrf = _get_csrf_token(http, wikidata_api)
@@ -190,6 +203,7 @@ def add_claim(qid):
 # ---------------------------------------------------------------------------
 
 @api.route('/item/<qid>/set-image', methods=['POST'])
+@login_required
 def set_image(qid):
     qid = qid.upper()
     body = request.get_json(silent=True) or {}

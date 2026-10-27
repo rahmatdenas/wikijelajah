@@ -18,25 +18,30 @@
   </div>
 
   {# -------------------------------------------------------
-     SEKSI: LANDING (Eksplorasi)
+     SEKSI: LANDING — form pencarian: wilayah lalu kategori
      ------------------------------------------------------- #}
   <section id="panel-landing" class="panel-section">
-    <h2>{{ msg('explore-start') }}</h2>
+    <header class="landing-intro">
+      <h2>{{ msg('explore-title') }}</h2>
+      <p>{{ msg('explore-intro') }}</p>
+    </header>
 
-    {# 1. Pilih tipe wilayah #}
+    <button type="button" id="btn-hasil-terakhir" class="last-results hidden"></button>
+
+    {# Tipe wilayah #}
     <div class="form-group">
-      <label class="form-label" for="select-wilayah-tipe">{{ msg('region-type') }}</label>
+      <label class="form-label" for="select-wilayah-tipe">{{ msg('region-label') }}</label>
       <select id="select-wilayah-tipe" class="form-select">
-        <option value="provinsi" selected>{{ msg('region-type-province') }}</option>
-        <option value="all">{{ msg('region-type-all') }}</option>
-        <option value="luar_negeri">{{ msg('region-type-abroad') }}</option>
-        <option value="qid">{{ msg('region-type-qid') }}</option>
+        {% for value, key in [('provinsi', 'region-opt-province'), ('all', 'region-opt-all'),
+                              ('luar_negeri', 'region-opt-abroad'), ('qid', 'region-opt-area')] %}
+        <option value="{{ value }}">{{ msg(key) }}</option>
+        {% endfor %}
       </select>
     </div>
 
-    {# 2a. Dropdown provinsi #}
+    {# Provinsi #}
     <div id="wadah-provinsi" class="form-group">
-      <label class="form-label" for="select-provinsi">{{ msg('region-province-choose') }}</label>
+      <label class="form-label visually-hidden" for="select-provinsi">{{ msg('region-province-choose') }}</label>
       <select id="select-provinsi" class="form-select">
         {% for value, label in wilayah_provinsi %}
         <option value="{{ value }}">{{ label }}</option>
@@ -44,9 +49,9 @@
       </select>
     </div>
 
-    {# 2b. Dropdown luar negeri — dirender server-side sebagai optgroup #}
+    {# Negara — dirender server-side sebagai optgroup per benua #}
     <div id="wadah-luar-negeri" class="form-group hidden">
-      <label class="form-label" for="select-negara">{{ msg('region-country-choose') }}</label>
+      <label class="form-label visually-hidden" for="select-negara">{{ msg('region-country-choose') }}</label>
       <select id="select-negara" class="form-select">
         {% for benua, negara_list in wilayah_luar_negeri.items() %}
         <optgroup label="{{ msg('continent-' + benua) }}">
@@ -58,9 +63,9 @@
       </select>
     </div>
 
-    {# 2c. Q-ID wilayah bebas — kota/kabupaten/kecamatan/desa, di mana pun #}
+    {# Wilayah bebas — kota/kabupaten/kecamatan/desa, di mana pun #}
     <div id="wadah-qid-wilayah" class="form-group hidden">
-      <label class="form-label" for="input-qid-wilayah">{{ msg('region-search') }}</label>
+      <label class="form-label visually-hidden" for="input-qid-wilayah">{{ msg('region-search') }}</label>
       <div class="prop-edit-field wilayah-field">
         <input type="text" id="input-qid-wilayah" class="form-input"
                placeholder="{{ msg('region-search-placeholder') }}" autocomplete="off" spellcheck="false"
@@ -70,9 +75,9 @@
       <small id="qid-wilayah-info" class="qid-wilayah-info">{{ msg('region-search-hint') }}</small>
     </div>
 
-    {# 3. Kategori data #}
+    {# Kategori #}
     <div class="form-group">
-      <label class="form-label" for="select-kategori">{{ msg('category-choose') }}</label>
+      <label class="form-label" for="select-kategori">{{ msg('category-label') }}</label>
       <select id="select-kategori" class="form-select">
         <option disabled selected value="">— {{ msg('category-placeholder') }} —</option>
         {% for group in kategori_data %}
@@ -90,11 +95,11 @@
       </select>
     </div>
 
-    {# Q-ID — terisi otomatis dari pilihan kategori, atau isi manual jika "Ketik Q-ID Sendiri" #}
-    <div class="form-group" id="wadah-qid">
+    {# Q-ID kategori — hanya tampil bila memilih "Ketik Q-ID Sendiri" #}
+    <div class="form-group hidden" id="wadah-qid">
       <label class="form-label" for="input-qid">{{ msg('qid-label') }}</label>
-      <input type="text" id="input-qid" class="form-input qid-input" readonly
-             placeholder="{{ msg('qid-placeholder') }}">
+      <input type="text" id="input-qid" class="form-input qid-input"
+             placeholder="{{ msg('qid-custom-placeholder') }}">
     </div>
 
     <button id="btn-jelajahi" class="btn btn--primary btn--full btn--large">
@@ -103,11 +108,16 @@
   </section>
 
   {# -------------------------------------------------------
-     SEKSI: HASIL + status loading inline (seperti original)
-     Panel ini langsung muncul saat "Jelajahi" diklik.
-     Status loading ditampilkan di dalam list, bukan panel terpisah.
+     SEKSI: HASIL — ringkasan pencarian, filter, lalu daftar.
+     Status loading ditampilkan di dalam panel ini.
      ------------------------------------------------------- #}
   <section id="panel-hasil" class="panel-section hidden">
+
+    <header class="results-head">
+      <button type="button" id="btn-ubah-pencarian" class="back-link">← {{ msg('results-edit-search') }}</button>
+      <h2 id="results-title" class="results-title"></h2>
+      <p id="results-count" class="results-count"></p>
+    </header>
 
     {# Status bar loading — disembunyikan setelah selesai #}
     <div id="hasil-loading-bar" class="hasil-loading-bar hidden">
@@ -120,22 +130,25 @@
     <p id="hasil-partial-note" class="hasil-partial-note hidden" role="status"></p>
 
     <div class="filter-header">
+      <input type="search" id="search-input" class="form-input search-input"
+             placeholder="{{ msg('search-counting') }}" autocomplete="off">
       <div class="filter-row">
-        <select id="filter-wilayah" class="form-select">
+        <select id="filter-wilayah" class="form-select form-select--sm" aria-label="{{ msg('region-label') }}">
           <option value="all">{{ msg('filter-all-regions') }}</option>
         </select>
-        <select id="filter-urut" class="form-select"></select>
+        <select id="filter-urut" class="form-select form-select--sm" aria-label="{{ msg('sort-label') }}"></select>
       </div>
-      <div class="feature-btns">
-        <button class="feature-btn loading" id="btn-jelajahi-artikel" data-filter="article">{{ msg('filter-articles') }}</button>
-        <button class="feature-btn loading" id="btn-jelajahi-gambar"  data-filter="image">{{ msg('filter-images') }}</button>
-        <button class="feature-btn loading" id="btn-semua-hasil"      data-filter="all">{{ msg('filter-all-results') }}</button>
+      <div class="segmented segmented--sm feature-btns" role="group" aria-label="{{ msg('filter-label') }}">
+        <button type="button" class="segmented-btn feature-btn active" id="btn-semua-hasil" data-filter="all" aria-pressed="true">{{ msg('filter-all') }}</button>
+        <button type="button" class="segmented-btn feature-btn loading" id="btn-jelajahi-artikel" data-filter="article" aria-pressed="false">{{ msg('filter-has-article') }}</button>
+        <button type="button" class="segmented-btn feature-btn loading" id="btn-jelajahi-gambar" data-filter="image" aria-pressed="false">{{ msg('filter-has-photo') }}</button>
       </div>
-      {# <a href="{{ url_for('main.enrich') }}" id="btn-enrich" class="enrich-bridge">✨ {{ msg('enrich-bridge') }} →</a> #}
     </div>
 
-    <input type="search" id="search-input" class="search-input"
-           placeholder="{{ msg('search-counting') }}" autocomplete="off">
+    {# Jembatan ke Perkaya Data (mode tabel) dengan wilayah & kategori yang sama #}
+    <a href="{{ url_for('main.enrich') }}" id="btn-enrich" class="enrich-link hidden">
+      ✨ {{ msg('enrich-cta-title') }} <span aria-hidden="true">→</span>
+    </a>
 
     <div id="hasil-container">
       <div id="loading-center" class="loading-state hidden">
@@ -148,7 +161,12 @@
           <p class="loading-subtitle">{{ msg('stop-search-hint') }}</p>
         </div>
       </div>
+      <div id="hasil-empty" class="empty-state hidden">
+        <p class="empty-state-title">{{ msg('results-none') }}</p>
+        <p>{{ msg('results-none-hint') }}</p>
+      </div>
       <ol id="hasil-list" class="result-list"></ol>
+      <nav id="hasil-pager" class="pager hidden" aria-label="{{ msg('results-pages') }}"></nav>
     </div>
   </section>
 
@@ -156,37 +174,6 @@
      SEKSI: DETAIL
      ------------------------------------------------------- #}
   <section id="panel-details" class="panel-section hidden"></section>
-
-  {# -------------------------------------------------------
-     SEKSI: TENTANG
-     ------------------------------------------------------- #}
-  <section id="panel-about" class="panel-section hidden">
-    <p>{{ msg('about-1') }}</p>
-    <p>{{ msg('about-2') }}</p>
-  </section>
-
-  {# --- Navigasi Bawah --- #}
-  <nav id="panel-nav" aria-label="{{ msg('panel-nav') }}">
-    {# Nav standar #}
-    <ul id="nav-standar">
-      <li class="text-left">
-        <a href="#" id="nav-beranda">{{ msg('panel-home') }}</a>
-      </li>
-      <li class="text-center">
-        <a href="#" id="nav-hasil">{{ msg('panel-results') }}</a>
-      </li>
-      <li class="text-right">
-        <a href="#" id="nav-tentang">{{ msg('panel-about') }}</a>
-      </li>
-    </ul>
-
-    {# Nav detail (saat membuka item) #}
-    <ul id="nav-detail" class="hidden">
-      <li class="flex-1 text-left"><a id="btn-prev" class="cursor-pointer fw-bold">{{ msg('panel-previous') }}</a></li>
-      <li class="flex-1 text-center"><a href="#" id="nav-kembali-hasil">{{ msg('panel-results') }}</a></li>
-      <li class="flex-1 text-right"><a id="btn-next" class="cursor-pointer fw-bold">{{ msg('panel-next') }}</a></li>
-    </ul>
-  </nav>
 
 </section>{# /panel #}
 

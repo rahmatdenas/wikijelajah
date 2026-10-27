@@ -1,0 +1,42 @@
+{# Modal Pengaturan AI — dipakai tombol ✨ AI di panel detail dan halaman Perkaya Data.
+   API key hanya disimpan di localStorage browser (ai.js). #}
+<div id="pk-settings" class="upload-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pk-settings-title">
+  <div class="upload-modal-box">
+    <div class="upload-modal-header">
+      <h3 id="pk-settings-title">{{ msg('pk-settings') }}</h3>
+      <button class="upload-modal-close" id="pk-settings-close" aria-label="{{ msg('button-close') }}">&times;</button>
+    </div>
+    <div class="upload-modal-body">
+      <div class="form-group">
+        <label class="form-label" for="pk-set-provider">{{ msg('pk-set-provider') }}</label>
+        <select id="pk-set-provider" class="form-select">
+          <option value="claude">Claude (Anthropic)</option>
+          <option value="openai">OpenAI</option>
+          <option value="gemini">Gemini (Google)</option>
+          <option value="groq">Groq</option>
+        </select>
+      </div>
+      {% for key, label in [('claude', 'Claude'), ('openai', 'OpenAI'), ('gemini', 'Gemini'), ('groq', 'Groq')] %}
+      <fieldset class="pk-set-provider" data-provider="{{ key }}">
+        <legend>{{ label }}</legend>
+        <div class="form-group">
+          <label class="form-label" for="pk-set-key-{{ key }}">API key</label>
+          <input type="password" id="pk-set-key-{{ key }}" class="form-input" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="pk-set-model-{{ key }}">Model</label>
+          <input type="text" id="pk-set-model-{{ key }}" class="form-input" placeholder="{{ default_models[key] }}" spellcheck="false">
+          {% if key == 'groq' %}
+          <small class="upload-hint">{{ msg('pk-set-groq-hint', groq_search_models | join(', '), 'console.groq.com') }}</small>
+          {% endif %}
+        </div>
+      </fieldset>
+      {% endfor %}
+      <p class="upload-hint">{{ msg('pk-set-key-hint') }}</p>
+    </div>
+    <div class="upload-modal-footer">
+      <button class="btn btn--secondary" id="pk-settings-cancel">{{ msg('button-cancel') }}</button>
+      <button class="btn btn--primary" id="pk-settings-save">{{ msg('button-save') }}</button>
+    </div>
+  </div>
+</div>

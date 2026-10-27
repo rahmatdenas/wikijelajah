@@ -2,7 +2,8 @@
 
 /* ==========================================================================
    ui.js — Helper UI bersama untuk semua halaman (Jelajah & Perkaya):
-   terjemahan, escaping, dialog, combobox, dan saran butir Wikidata.
+   terjemahan, escaping, dialog, combobox, saran butir Wikidata,
+   konteks pencarian bersama, dan panduan singkat.
    ========================================================================== */
 
 const $ = id => document.getElementById(id);
@@ -270,12 +271,85 @@ function initTopNavMenu(toggleId, menuId) {
 }
 
 // ---------------------------------------------------------------------------
+// KONTEKS PENCARIAN BERSAMA — wilayah & kategori terakhir dibawa antarhalaman
+// (Jelajah ↔ Perkaya Data) lewat parameter URL yang sama:
+// ?region=province|all|abroad|area&province=Q..&country=Q..&area=Q..&category=<slug>
+// ---------------------------------------------------------------------------
+const WJ_CONTEXT_KEY = 'wj-context';
+
+// Nilai ?region= di URL ↔ nilai internal tipe wilayah
+const REGION_FROM_PARAM = { province: 'provinsi', all: 'all', abroad: 'luar_negeri', area: 'qid' };
+const REGION_TO_PARAM = Object.fromEntries(Object.entries(REGION_FROM_PARAM).map(([k, v]) => [v, k]));
+
+function loadSearchContext() {
+  try { return JSON.parse(localStorage.getItem(WJ_CONTEXT_KEY) || 'null'); } catch { return null; }
+}
+
+function saveSearchContext(ctx) {
+  try { localStorage.setItem(WJ_CONTEXT_KEY, JSON.stringify(ctx)); } catch {}
+  updateNavLinks();
+}
+
+function contextQuery(ctx) {
+  if (!ctx?.category) return '';
+  const q = new URLSearchParams();
+  if (ctx.region) q.set('region', ctx.region);
+  ['province', 'country', 'area'].forEach(k => { if (ctx[k]) q.set(k, ctx[k]); });
+  q.set('category', ctx.category);
+  return q.toString();
+}
+
+function contextUrl(path, ctx) {
+  const q = contextQuery(ctx);
+  return q ? `${path}?${q}` : path;
+}
+
+/** Tautan antarhalaman (logo, menu akun, dll.) membawa konteks terakhir, kecuali ke halaman yang sedang dibuka. */
+function updateNavLinks() {
+  const ctx = loadSearchContext();
+  document.querySelectorAll('a[data-nav-context]').forEach(a => {
+    if (a.pathname === location.pathname) return;
+    a.dataset.basePath ||= a.pathname;
+    a.href = contextUrl(a.dataset.basePath, ctx);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// PANDUAN SINGKAT — terbuka otomatis sekali pada kunjungan pertama
+// ---------------------------------------------------------------------------
+const WJ_GUIDE_KEY = 'wj-guide-seen';
+
+function openGuide() { $('guide-modal')?.classList.remove('hidden'); }
+
+function closeGuide() {
+  $('guide-modal')?.classList.add('hidden');
+  try { localStorage.setItem(WJ_GUIDE_KEY, '1'); } catch {}
+}
+
+function initGuide() {
+  const modal = $('guide-modal');
+  if (!modal) return;
+  document.querySelectorAll('.js-open-guide').forEach(b => b.addEventListener('click', openGuide));
+  modal.querySelectorAll('.js-guide-close').forEach(b => b.addEventListener('click', closeGuide));
+  modal.addEventListener('click', e => { if (e.target === modal) closeGuide(); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && !modal.classList.contains('hidden')) closeGuide();
+  });
+  let seen = true;
+  try { seen = !!localStorage.getItem(WJ_GUIDE_KEY); } catch {}
+  // Tautan yang sudah membawa pencarian (mis. dibagikan) langsung ke isinya, tanpa panduan
+  if (!seen && !new URLSearchParams(location.search).has('category')) openGuide();
+}
+
+// ---------------------------------------------------------------------------
 // INIT — dialog, preloader, menu
 // ---------------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
   window.addEventListener('load', () => $('preloader')?.classList.add('hidden'));
   initTopNavMenu('top-nav-menu-toggle', 'top-nav-menu');
   initTopNavMenu('top-nav-lang-toggle', 'top-nav-lang-menu');
+  initGuide();
+  updateNavLinks();
 
   $('dialog-overlay')?.addEventListener('click', e => {
     if (!e.target.closest('.dialog-box')) $('dialog-overlay').classList.add('hidden');
