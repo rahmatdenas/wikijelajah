@@ -1,33 +1,71 @@
 {# =========================================================
    TOP NAVIGATION BAR — dipakai semua halaman
-   Tamu: hanya tombol Masuk.
-   Login desktop: tautan halaman di samping profil; dropdown profil berisi
-   Profil Wikimedia & Keluar.
-   Login mobile: tautan halaman ikut masuk ke dropdown profil.
+   Kiri: logo + tautan halaman (untuk semua orang, juga tamu).
+   Kanan: tombol bahasa + tombol Masuk (tamu) atau dropdown profil berisi
+   Profil Wikimedia & Keluar (login).
+   Di layar sempit judul disembunyikan dan tautan memakai label pendek.
    ========================================================= #}
+{% set nav_icons = {
+  'main.index': '<path d="M15 5.1 9 3 3 5v16l6-2.1 6 2.1 6-2V3l-6 2.1zM10 5.47l4 1.4v11.66l-4-1.4V5.47zM5 6.46l3-1.01v11.7l-3 1.16V6.46zm14 11.08-3 1.01V6.86l3-1.16v11.84z"/>',
+  'main.enrich': '<path d="m19 9 1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25L19 9zm-7.5.5L9 4 6.5 9.5 1 12l5.5 2.5L9 20l2.5-5.5L17 12l-5.5-2.5zM19 15l-1.25 2.75L15 19l2.75 1.25L19 23l1.25-2.75L23 19l-2.75-1.25L19 15z"/>',
+} %}
 {% set nav_links = [
-  ('main.index', 'Jelajah'),
-  ('main.perkaya', 'Perkaya Data'),
+  ('main.index', msg('nav-explore'), msg('nav-explore')),
+  ('main.enrich', msg('nav-enrich'), msg('nav-enrich-short')),
 ] %}
 <header id="top-nav">
-  <a href="{{ url_for('main.index') }}" class="top-nav-brand" title="Ke halaman utama">
+  <a href="{{ url_for('main.index') }}" class="top-nav-brand" title="{{ msg('nav-home-title') }}">
     <img src="{{ url_for('static', filename='img/logobaru.png') }}"
          alt="" class="top-nav-logo">
     <span class="top-nav-title">WikiJelajah</span>
   </a>
 
+  <nav class="top-nav-links" aria-label="{{ msg('nav-pages') }}">
+    {% for endpoint, label, short in nav_links %}
+    <a href="{{ url_for(endpoint) }}"
+       class="top-nav-link{% if request.endpoint == endpoint %} active{% endif %}"
+       {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>
+      <svg class="top-nav-link-icon" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">{{ nav_icons[endpoint] | safe }}</svg>
+      <span class="top-nav-link-full">{{ label }}</span>
+      <span class="top-nav-link-short">{{ short }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+
+  {# Pilih bahasa — nama bahasa ditulis dalam bahasanya sendiri, tanpa bendera.
+     Tamu: di samping tombol Masuk; login: di samping tombol profil. #}
+  {% set lang_switcher %}
+    <div class="top-nav-menu-wrap">
+      <button type="button" id="top-nav-lang-toggle" class="top-nav-user-link top-nav-menu-toggle top-nav-lang-toggle"
+              aria-haspopup="true" aria-expanded="false" aria-controls="top-nav-lang-menu"
+              aria-label="{{ msg('language-select') }}: {{ (language_options | selectattr(0, 'equalto', lang) | first)[1] }}"
+              title="{{ msg('language-select') }}">
+        <svg viewBox="0 0 20 20" width="16" height="16" fill="currentColor" aria-hidden="true">
+          <path d="M20 18h-1.44a.6.6 0 0 1-.4-.12.8.8 0 0 1-.23-.31L17 15h-5l-1 2.54a.8.8 0 0 1-.22.3.6.6 0 0 1-.4.14H9l4.55-11.47h1.89zm-3.53-4.31L14.89 9.5a12 12 0 0 1-.39-1.24q-.09.37-.19.69l-.19.56-1.58 4.19zm-6.3-1.58a13.4 13.4 0 0 1-2.91-1.41 11.46 11.46 0 0 0 2.81-5.37H12V4H7.31a4 4 0 0 0-.2-.56C6.87 2.79 6.6 2 6.6 2l-1.47.5s.4.89.6 1.5H0v1.33h2.15A11.23 11.23 0 0 0 5 10.7a17.2 17.2 0 0 1-5 2.1q.56.82.87 1.38a23.3 23.3 0 0 0 5.22-2.51 15.6 15.6 0 0 0 3.56 1.77zM3.63 5.33h4.91a8.1 8.1 0 0 1-2.45 4.45 9.1 9.1 0 0 1-2.46-4.45"/>
+        </svg>
+        <span class="top-nav-lang-code">{{ lang }}</span>
+        <svg class="top-nav-caret" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true">
+          <path d="M7 10l5 5 5-5z"/>
+        </svg>
+      </button>
+      <div id="top-nav-lang-menu" class="top-nav-menu hidden" role="menu">
+        {% for code, name in language_options %}
+        <a href="{{ url_for('main.set_language', code=code, next=lang_next) }}" role="menuitem"
+           lang="{{ code }}" hreflang="{{ code }}"
+           class="top-nav-menu-item{% if code == lang %} active{% endif %}"
+           {% if code == lang %}aria-current="true"{% endif %}>{{ name }}</a>
+        {% endfor %}
+      </div>
+    </div>
+  {% endset %}
+
   <div class="top-nav-auth">
     {% if user %}
-    <nav class="top-nav-links" aria-label="Halaman">
-      {% for endpoint, label in nav_links %}
-      <a href="{{ url_for(endpoint) }}"
-         class="top-nav-link{% if request.endpoint == endpoint %} active{% endif %}"
-         {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ label }}</a>
-      {% endfor %}
-    </nav>
+    {{ lang_switcher }}
     <div class="top-nav-menu-wrap">
       <button type="button" id="top-nav-menu-toggle" class="top-nav-user-link top-nav-menu-toggle"
-              aria-haspopup="true" aria-expanded="false" aria-controls="top-nav-menu">
+              aria-haspopup="true" aria-expanded="false" aria-controls="top-nav-menu"
+              aria-label="{{ user.username }}" title="{{ user.username }}">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
           <path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>
         </svg>
@@ -37,24 +75,22 @@
         </svg>
       </button>
       <div id="top-nav-menu" class="top-nav-menu hidden" role="menu">
-        {% for endpoint, label in nav_links %}
-        <a href="{{ url_for(endpoint) }}" role="menuitem"
-           class="top-nav-menu-item top-nav-menu-item--page{% if request.endpoint == endpoint %} active{% endif %}"
-           {% if request.endpoint == endpoint %}aria-current="page"{% endif %}>{{ label }}</a>
-        {% endfor %}
+        {# Nama pengguna di dalam menu hanya tampil di layar sempit (tombolnya cukup ikon) #}
+        <span class="top-nav-menu-user">{{ user.username }}</span>
         <a href="https://www.mediawiki.org/wiki/User:{{ user.username | urlencode }}" role="menuitem"
            target="_blank" rel="noopener noreferrer"
-           class="top-nav-menu-item top-nav-menu-item--sep">Profil Wikimedia ↗</a>
+           class="top-nav-menu-item top-nav-menu-item--sep">{{ msg('nav-profile') }} ↗</a>
         <a href="{{ url_for('auth.logout') }}" role="menuitem"
-           class="top-nav-menu-item top-nav-menu-item--logout">Keluar</a>
+           class="top-nav-menu-item top-nav-menu-item--logout">{{ msg('nav-logout') }}</a>
       </div>
     </div>
     {% else %}
+    {{ lang_switcher }}
     <a href="{{ url_for('auth.login', next=request.full_path) }}" class="top-nav-btn top-nav-btn--login">
       <svg class="wikimedia-w" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
         <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.5 14.5l-3-8h1.5l1.8 5.2 1.8-5.2h1.5l1.8 5.2 1.8-5.2H18l-3 8-2-5.5-2 5.5z"/>
       </svg>
-      Masuk
+      {{ msg('nav-login') }}
     </a>
     {% endif %}
   </div>

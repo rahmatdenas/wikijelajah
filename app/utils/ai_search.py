@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from ..i18n import msg
+
 # Model bawaan per penyedia; pengguna bisa menggantinya di pengaturan halaman.
 DEFAULT_MODELS = {
     'claude': 'claude-opus-5-5',
@@ -53,7 +55,19 @@ Finish with ONLY a JSON object (no markdown, no extra text) in this shape:
  ],
  "note": "..."}
 - quote_language: ISO 639-1 code of the quote's language (e.g. "id", "en").
-- note: one short sentence in Indonesian (e.g. why not found, why sources disagree, or a caveat)."""
+- note: one short sentence in {note_language} (e.g. why not found, why sources disagree, or a caveat)."""
+
+# Nama bahasa (dalam bahasa Inggris) untuk catatan AI, mengikuti bahasa antarmuka pengguna
+NOTE_LANGUAGES = {
+    'id': 'Indonesian', 'en': 'English', 'jv': 'Javanese', 'su': 'Sundanese', 'min': 'Minangkabau',
+    'ban': 'Balinese', 'bjn': 'Banjarese', 'ace': 'Acehnese', 'bug': 'Buginese', 'mad': 'Madurese',
+    'ms': 'Malay', 'nl': 'Dutch', 'de': 'German', 'fr': 'French', 'es': 'Spanish', 'ja': 'Japanese',
+}
+
+
+def system_prompt(note_lang):
+    name = NOTE_LANGUAGES.get(note_lang) or f'the language with code "{note_lang}"'
+    return SYSTEM_PROMPT.replace('{note_language}', name)
 
 VALUE_FORMAT = {
     'quantity': 'a plain number in {unit}, dot as decimal separator, no thousands separator (e.g. 2157 or 3.5)',
@@ -65,10 +79,20 @@ VALUE_FORMAT = {
 
 
 UNIT_NAMES = {'mdpl': 'metres above sea level', 'm': 'metres', 'km²': 'square kilometres'}
+# Label satuan dari browser bisa sudah diterjemahkan; satuan dikenali juga dari QID-nya
+UNIT_QID_NAMES = {'Q11573': 'metres', 'Q712226': 'square kilometres'}
 
 
 class AISearchError(Exception):
-    """Kegagalan pencarian AI; pesannya aman ditampilkan ke pengguna."""
+    """Kegagalan pencarian AI; pesannya aman ditampilkan ke pengguna.
+
+    fatal=True bila mengulang untuk butir lain pasti gagal juga (API key salah,
+    tidak punya akses, kuota habis) sehingga antrean di browser dihentikan.
+    """
+
+    def __init__(self, message, fatal=False):
+        super().__init__(message)
+        self.fatal = fatal
 
 
 # ---------------------------------------------------------------------------
@@ -77,7 +101,8 @@ class AISearchError(Exception):
 
 def build_prompt(item, attr):
     unit_label = attr.get('unit_label') or ''
-    unit = UNIT_NAMES.get(unit_label, unit_label) or 'no unit (a plain count or number)'
+    unit = (UNIT_NAMES.get(unit_label) or UNIT_QID_NAMES.get(attr.get('unit') or '') or unit_label
+            or 'no unit (a plain count or number)')
     fmt = VALUE_FORMAT[attr['type']].format(unit=unit)
 
     lines = [
@@ -96,23 +121,27 @@ def build_prompt(item, attr):
 # PENYEDIA AI
 # ---------------------------------------------------------------------------
 
-def search(provider, api_key, model, item, attr):
-    """Jalankan pencarian AI. Kembalikan dict hasil (lihat _parse_answer) + 'model' yang dipakai."""
+def search(provider, api_key, model, item, attr, note_lang='id'):
+    """Jalankan pencarian AI. Kembalikan dict hasil (lihat _parse_answer) + 'model' yang dipakai.
+
+    note_lang: bahasa catatan singkat AI (bahasa antarmuka pengguna).
+    """
     if not api_key:
-        raise AISearchError('API key belum diisi. Buka ⚙ Pengaturan AI.')
+        raise AISearchError(msg('ai-key-missing'), fatal=True)
     prompt = build_prompt(item, attr)
+    system = system_prompt(note_lang)
     model = model or DEFAULT_MODELS[provider]
 
     if provider == 'claude':
-        text, citations = _search_claude(api_key, model, prompt)
+        text, citations = _search_claude(api_key, model, system, prompt)
     elif provider == 'openai':
-        text, citations = _search_openai(api_key, model, prompt)
+        text, citations = _search_openai(api_key, model, system, prompt)
     elif provider == 'gemini':
-        text, citations = _search_gemini(api_key, model, prompt)
+        text, citations = _search_gemini(api_key, model, system, prompt)
     elif provider == 'groq':
-        text, citations, model = _search_groq(api_key, model, prompt)
+        text, citations, model = _search_groq(api_key, model, system, prompt)
     else:
-        raise AISearchError(f'Penyedia AI "{provider}" tidak dikenal')
+        raise AISearchError(msg('api-provider-invalid'))
 
     result = _parse_answer(text)
 
@@ -130,7 +159,7 @@ def search(provider, api_key, model, item, attr):
 _CLAUDE_FALLBACK_MODELS = {'claude-opus-5-5', 'claude-opus-5', 'claude-fable-5-1', 'claude-sonnet-5-5'}
 
 
-def _search_claude(api_key, model, prompt):
+def _search_claude(api_key, model, system, prompt):
     import anthropic
 
     client = anthropic.Anthropic(api_key=api_key, timeout=AI_TIMEOUT)
@@ -138,7 +167,7 @@ def _search_claude(api_key, model, prompt):
     params = {
         'model': model,
         'max_tokens': 16000,
-        'system': SYSTEM_PROMPT,
+        'system': system,
         'tools': [{
             'type': 'web_search_20250305' if older else 'web_search_20260209',
             'name': 'web_search',
@@ -164,20 +193,20 @@ def _search_claude(api_key, model, prompt):
             messages = [{'role': 'user', 'content': prompt},
                         {'role': 'assistant', 'content': resp.content}]
     except anthropic.AuthenticationError:
-        raise AISearchError('API key Claude tidak valid') from None
+        raise AISearchError(msg('ai-key-invalid', 'Claude'), fatal=True) from None
     except anthropic.PermissionDeniedError:
-        raise AISearchError('API key Claude tidak punya akses ke model/fitur ini') from None
+        raise AISearchError(msg('ai-no-access', 'Claude'), fatal=True) from None
     except anthropic.RateLimitError:
-        raise AISearchError('Batas pemakaian Claude tercapai, coba lagi sebentar') from None
+        raise AISearchError(msg('ai-rate-limited', 'Claude'), fatal=True) from None
     except anthropic.BadRequestError as e:
-        raise AISearchError(f'Permintaan ke Claude ditolak: {e.message}') from None
+        raise AISearchError(msg('ai-request-rejected', 'Claude', e.message)) from None
     except anthropic.APIStatusError as e:
-        raise AISearchError(f'Claude error {e.status_code}, coba lagi') from None
+        raise AISearchError(msg('ai-status-error', 'Claude', e.status_code)) from None
     except anthropic.APIConnectionError:
-        raise AISearchError('Tidak bisa terhubung ke Claude') from None
+        raise AISearchError(msg('ai-connection-failed', 'Claude')) from None
 
     if resp.stop_reason == 'refusal':
-        raise AISearchError('Claude menolak permintaan ini')
+        raise AISearchError(msg('ai-refused', 'Claude'))
 
     text_parts, citations = [], []
     for block in resp.content:
@@ -190,25 +219,25 @@ def _search_claude(api_key, model, prompt):
     return ''.join(text_parts), citations
 
 
-def _search_openai(api_key, model, prompt):
+def _search_openai(api_key, model, system, prompt):
     import openai
 
     client = openai.OpenAI(api_key=api_key, timeout=AI_TIMEOUT)
     try:
         resp = client.responses.create(
             model=model,
-            instructions=SYSTEM_PROMPT,
+            instructions=system,
             input=prompt,
             tools=[{'type': 'web_search'}],
         )
     except openai.AuthenticationError:
-        raise AISearchError('API key OpenAI tidak valid') from None
+        raise AISearchError(msg('ai-key-invalid', 'OpenAI'), fatal=True) from None
     except openai.RateLimitError:
-        raise AISearchError('Batas pemakaian OpenAI tercapai, coba lagi sebentar') from None
+        raise AISearchError(msg('ai-rate-limited', 'OpenAI'), fatal=True) from None
     except openai.APIStatusError as e:
-        raise AISearchError(f'OpenAI error {e.status_code}: {e.message}') from None
+        raise AISearchError(msg('ai-request-rejected', 'OpenAI', f'{e.status_code}: {e.message}')) from None
     except openai.APIConnectionError:
-        raise AISearchError('Tidak bisa terhubung ke OpenAI') from None
+        raise AISearchError(msg('ai-connection-failed', 'OpenAI')) from None
 
     citations = []
     for out in resp.output or []:
@@ -221,7 +250,7 @@ def _search_openai(api_key, model, prompt):
     return resp.output_text or '', citations
 
 
-def _search_gemini(api_key, model, prompt):
+def _search_gemini(api_key, model, system, prompt):
     from google import genai
     from google.genai import errors, types
 
@@ -231,18 +260,18 @@ def _search_gemini(api_key, model, prompt):
             model=model,
             contents=prompt,
             config=types.GenerateContentConfig(
-                system_instruction=SYSTEM_PROMPT,
+                system_instruction=system,
                 tools=[types.Tool(google_search=types.GoogleSearch())],
             ),
         )
     except errors.ClientError as e:
         if e.code in (401, 403) or 'API key' in str(e):
-            raise AISearchError('API key Gemini tidak valid') from None
+            raise AISearchError(msg('ai-key-invalid', 'Gemini'), fatal=True) from None
         if e.code == 429:
-            raise AISearchError('Batas pemakaian Gemini tercapai, coba lagi sebentar') from None
-        raise AISearchError(f'Permintaan ke Gemini ditolak: {e.message}') from None
+            raise AISearchError(msg('ai-rate-limited', 'Gemini'), fatal=True) from None
+        raise AISearchError(msg('ai-request-rejected', 'Gemini', e.message)) from None
     except errors.APIError as e:
-        raise AISearchError(f'Gemini error {e.code}, coba lagi') from None
+        raise AISearchError(msg('ai-status-error', 'Gemini', e.code)) from None
 
     citations = []
     cand = (resp.candidates or [None])[0]
@@ -253,7 +282,7 @@ def _search_gemini(api_key, model, prompt):
     return resp.text or '', citations
 
 
-def _search_groq(api_key, model, prompt):
+def _search_groq(api_key, model, system, prompt):
     """Groq + browser_search. Coba model pilihan, lalu model cadangan yang juga bisa mencari web."""
     import groq
 
@@ -266,7 +295,7 @@ def _search_groq(api_key, model, prompt):
             resp = client.chat.completions.create(
                 model=m,
                 messages=[
-                    {'role': 'system', 'content': SYSTEM_PROMPT},
+                    {'role': 'system', 'content': system},
                     {'role': 'user', 'content': prompt},
                 ],
                 tools=[{'type': 'browser_search'}],
@@ -275,9 +304,9 @@ def _search_groq(api_key, model, prompt):
                 max_completion_tokens=8192,
             )
         except (groq.AuthenticationError, groq.PermissionDeniedError):
-            raise AISearchError('API key Groq tidak valid atau tidak punya akses') from None
+            raise AISearchError(msg('ai-key-invalid', 'Groq'), fatal=True) from None
         except groq.RateLimitError:
-            failures.append(f'{m}: batas pemakaian tercapai')
+            failures.append(f"{m}: {msg('ai-groq-rate-limited')}")
             continue
         except (groq.NotFoundError, groq.BadRequestError) as e:
             # Model tidak ada / sudah dihentikan / tidak mendukung browser_search
@@ -287,11 +316,11 @@ def _search_groq(api_key, model, prompt):
             failures.append(f'{m}: error {e.status_code}')
             continue
         except groq.APIConnectionError:
-            raise AISearchError('Tidak bisa terhubung ke Groq') from None
+            raise AISearchError(msg('ai-connection-failed', 'Groq')) from None
 
         msg = resp.choices[0].message
         if not (msg.content or '').strip():
-            failures.append(f'{m}: jawaban kosong')
+            failures.append(f"{m}: {msg('ai-groq-empty')}")
             continue
 
         citations = []
@@ -304,7 +333,7 @@ def _search_groq(api_key, model, prompt):
                     citations.append({'url': r.url, 'title': r.title or ''})
         return msg.content, citations, m
 
-    raise AISearchError('Semua model Groq gagal — ' + '; '.join(failures))
+    raise AISearchError(msg('ai-groq-all-failed', '; '.join(failures)))
 
 
 # ---------------------------------------------------------------------------
@@ -342,7 +371,7 @@ def _parse_answer(text):
     """Baca jawaban AI → {'found', 'values': [{'value', 'sources': [...]}], 'note'}."""
     data = _extract_json(text)
     if data is None:
-        raise AISearchError('Jawaban AI tidak bisa dibaca (bukan JSON)')
+        raise AISearchError(msg('ai-unreadable'))
 
     raw_values = data.get('values')
     if not isinstance(raw_values, list):
@@ -461,7 +490,7 @@ VERIFICATION_RANK = {
 }
 
 
-def verify(source_url, quote, datatype, value):
+def verify(source_url, quote, datatype, value, lang=None):
     """Periksa kutipan & nilai di halaman sumber.
 
     Kembalikan (status, keterangan). status:
@@ -470,23 +499,26 @@ def verify(source_url, quote, datatype, value):
       nilai_di_halaman  — kutipan tidak persis, tapi nilainya tertulis di halaman
       tidak_terverifikasi — kutipan maupun nilai tidak ditemukan di halaman
       gagal_dibuka      — halaman tidak bisa dibuka/dibaca otomatis
+
+    lang: bahasa keterangan; wajib diisi bila dipanggil dari thread lain
+    (di luar konteks permintaan Flask).
     """
     if not source_url:
-        return 'gagal_dibuka', 'AI tidak menyertakan URL sumber.'
+        return 'gagal_dibuka', msg('verify-no-url', lang=lang)
     if not _is_public_url(source_url):
-        return 'gagal_dibuka', 'URL sumber tidak valid.'
+        return 'gagal_dibuka', msg('verify-bad-url', lang=lang)
     try:
         r = requests.get(source_url, headers={'User-Agent': FETCH_UA}, timeout=20)
     except requests.RequestException:
-        return 'gagal_dibuka', 'Halaman sumber tidak bisa dibuka (timeout/koneksi).'
+        return 'gagal_dibuka', msg('verify-unreachable', lang=lang)
     if r.status_code >= 400:
-        return 'gagal_dibuka', f'Halaman sumber merespons HTTP {r.status_code}.'
+        return 'gagal_dibuka', msg('verify-http-error', r.status_code, lang=lang)
 
     ctype = r.headers.get('Content-Type', '')
     if 'pdf' in ctype:
-        return 'gagal_dibuka', 'Sumber berupa PDF; periksa manual.'
+        return 'gagal_dibuka', msg('verify-pdf', lang=lang)
     if 'html' not in ctype and 'text' not in ctype:
-        return 'gagal_dibuka', f'Jenis konten tidak didukung ({ctype or "tidak diketahui"}).'
+        return 'gagal_dibuka', msg('verify-unsupported', ctype or msg('unknown', lang=lang), lang=lang)
 
     page = _normalize_text(_html_to_text(r.text))
     q = _normalize_text(quote)
@@ -507,9 +539,9 @@ def verify(source_url, quote, datatype, value):
     value_in_page = any(v and v in page for v in variants)
 
     if quote_found and value_in_quote:
-        return 'terverifikasi', 'Kutipan dan nilainya ditemukan di halaman sumber.'
+        return 'terverifikasi', msg('verify-ok', lang=lang)
     if quote_found:
-        return 'nilai_tidak_cocok', 'Kutipan ada di halaman, tetapi nilainya tidak tertulis di kutipan.'
+        return 'nilai_tidak_cocok', msg('verify-value-mismatch', lang=lang)
     if value_in_page:
-        return 'nilai_di_halaman', 'Kutipan tidak persis sama, tetapi nilainya tertulis di halaman.'
-    return 'tidak_terverifikasi', 'Kutipan maupun nilainya tidak ditemukan di halaman sumber.'
+        return 'nilai_di_halaman', msg('verify-value-on-page', lang=lang)
+    return 'tidak_terverifikasi', msg('verify-unverified', lang=lang)

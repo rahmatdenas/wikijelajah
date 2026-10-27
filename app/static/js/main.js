@@ -165,7 +165,7 @@ function renderWilayahSuggest() {
           <span class="prop-suggest-qid">${escHtml(w.id)}</span>
           ${w.description ? `<span class="prop-suggest-desc">${escHtml(w.description)}</span>` : ''}
         </li>`).join('')
-    : '<li class="prop-suggest-empty">Tidak ada wilayah dengan nama ini</li>';
+    : `<li class="prop-suggest-empty">${escHtml(msg('region-none-suggest'))}</li>`;
   list.classList.remove('hidden');
   DOM.inputQidWilayah.setAttribute('aria-expanded', 'true');
 }
@@ -173,15 +173,15 @@ function renderWilayahSuggest() {
 /** Q-ID diketik langsung: periksa keberadaannya, ambil nama & negaranya. */
 async function resolveWilayahQid(id, signal) {
   const [data, claims] = await Promise.all([
-    _wbGet({ action: 'wbgetentities', ids: id, props: 'labels|descriptions', languages: 'id|en|mul' }, signal),
+    _wbGet({ action: 'wbgetentities', ids: id, props: 'labels|descriptions', languages: WD_LANGS.join('|') }, signal),
     _wbGet({ action: 'wbgetclaims', entity: id, property: 'P17' }, signal).catch(() => ({})),
   ]);
   const e = data.entities?.[id];
   if (!e || 'missing' in e) return null;
   return {
     id,
-    label: e.labels?.id?.value || e.labels?.en?.value || e.labels?.mul?.value || id,
-    description: e.descriptions?.id?.value || e.descriptions?.en?.value || '',
+    label: pickLang(e.labels) || id,
+    description: pickLang(e.descriptions),
     // Negara wilayah — membatasi query "Semua Jenis Objek" agar tidak timeout
     negara: _itemId(bestRankClaims(claims.claims?.P17)[0]?.mainsnak?.datavalue?.value) || '',
   };
@@ -197,27 +197,26 @@ function onQidWilayahInput() {
 
   const raw = input.value.trim();
   const qid = normalizeWilayahQid(raw);
-  if (!raw) return setWilayahInfo('', 'Ketik nama kota, kabupaten, atau kecamatan, lalu pilih dari daftar.');
-  if (!qid && raw.length < 2) return setWilayahInfo('', 'Ketik minimal 2 huruf.');
+  if (!raw) return setWilayahInfo('', msg('region-search-hint'));
+  if (!qid && raw.length < 2) return setWilayahInfo('', msg('region-search-min'));
 
-  setWilayahInfo('', qid ? 'Memeriksa Q-ID…' : 'Mencari wilayah…');
+  setWilayahInfo('', msg(qid ? 'region-checking-qid' : 'region-searching'));
   _wilayahTimer = setTimeout(async () => {
     _wilayahCtrl = new AbortController();
     try {
       if (qid) {
         const w = await resolveWilayahQid(qid.slice(3), _wilayahCtrl.signal);
-        if (!w) return setWilayahInfo('bad', `${qid.slice(3)} tidak ditemukan di Wikidata.`);
+        if (!w) return setWilayahInfo('bad', msg('region-qid-missing', qid.slice(3)));
         selectWilayah(w);
         input.value = raw;  // biarkan Q-ID yang diketik tetap terlihat
         return;
       }
       _wilayahResults = await searchWilayah(raw, _wilayahCtrl.signal);
       renderWilayahSuggest();
-      setWilayahInfo(_wilayahResults.length ? '' : 'bad', _wilayahResults.length
-        ? 'Pilih wilayah dari daftar (↑ ↓ lalu Enter).'
-        : 'Wilayah tidak ditemukan. Coba ejaan lain atau masukkan Q-ID.');
+      setWilayahInfo(_wilayahResults.length ? '' : 'bad',
+        msg(_wilayahResults.length ? 'region-choose-hint' : 'region-none'));
     } catch (err) {
-      if (err.name !== 'AbortError') setWilayahInfo('bad', 'Gagal mencari wilayah, coba lagi.');
+      if (err.name !== 'AbortError') setWilayahInfo('bad', msg('region-search-failed'));
     }
   }, qid ? 300 : 450);
 }
@@ -262,7 +261,7 @@ function updateQidFromKategori() {
   if (val === 'custom') {
     DOM.inputQid.value = '';
     DOM.inputQid.readOnly = false;
-    DOM.inputQid.placeholder = 'Contoh: wd:Q1234 wd:Q5678';
+    DOM.inputQid.placeholder = msg('qid-custom-placeholder');
     DOM.inputQid.focus();
   } else {
     DOM.inputQid.value = val;
@@ -309,7 +308,8 @@ function setLoadingStatus(text) {
 const _CACHE_TTL = 30 * 60 * 1000;
 
 function _cacheKey(p) {
-  return `wj2:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
+  // Bahasa ikut kunci: label & judul artikel Wikipedia berbeda per bahasa
+  return `wj3:${I18N.lang}:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
 }
 
 function _loadCache(key) {
@@ -346,14 +346,17 @@ async function startSearch() {
   const opt       = DOM.selectKategori.options[DOM.selectKategori.selectedIndex];
 
   if (!opt || !opt.value) {
-    appShowDialog('Pilih kategori data terlebih dahulu.', 'alert', 'Perhatian');
+    appShowDialog(escHtml(msg('category-required')), 'alert', msg('dialog-attention'));
     return;
   }
 
   const jenis       = opt.value === 'custom'
     ? (DOM.inputQid?.value?.trim() || '')
     : opt.value;
+  // klasterNama = kunci internal (nama Indonesia); klasterLabel = teks tampilan sesuai bahasa
   const klasterNama  = opt.dataset.klaster   || opt.textContent.trim();
+  const klasterLabel = opt.textContent.trim();
+  const klasterSlug  = opt.dataset.slug || '';
   const propLokasi   = opt.dataset.lokasi    || 'P131';
   const propTahun    = opt.dataset.tahun     || 'P571';
   const useSubclass  = opt.dataset.subclass  === '1';
@@ -363,7 +366,7 @@ async function startSearch() {
     : DOM.inputQidWilayah.dataset.qid ? `wd:${DOM.inputQidWilayah.dataset.qid}`
     : normalizeWilayahQid(DOM.inputQidWilayah.value);
   if (tipe === 'qid' && !wilayahQid) {
-    appShowDialog('Pilih wilayah dari daftar saran, atau masukkan Q-ID wilayah (mis. wd:Q11477).', 'alert', 'Perhatian');
+    appShowDialog(escHtml(msg('region-required')), 'alert', msg('dialog-attention'));
     DOM.inputQidWilayah?.focus();
     return;
   }
@@ -377,7 +380,7 @@ async function startSearch() {
     : 'Indonesia';
 
   const params = {
-    jenis, klasterNama, propLokasi, propTahun, useSubclass,
+    jenis, klasterNama, klasterLabel, klasterSlug, propLokasi, propTahun, useSubclass,
     wilayah:   tipe === 'provinsi' ? 'provinsi' : tipe,
     // Q-ID wilayah bebas memakai jalur query yang sama dengan provinsi
     provQid:   tipe === 'provinsi' ? provQid : tipe === 'qid' ? wilayahQid : '',
@@ -417,7 +420,7 @@ async function startSearch() {
     return;
   }
 
-  setLoadingStatus(`Menarik ${klasterNama} di ${wilayahNama}…`);
+  setLoadingStatus(msg('loading-category', klasterLabel, wilayahNama));
 
   try {
     // ===== FASE 1: Item + koordinat langsung dari SPARQL =====
@@ -444,7 +447,7 @@ async function startSearch() {
         State.records[qid].provLabel = row.pLabel?.value || '';
       }
     }, total => {
-      setLoadingStatus(`Menarik ${klasterNama} di ${wilayahNama}… ${total.toLocaleString('id-ID')} ditemukan`);
+      setLoadingStatus(msg('loading-category-count', klasterLabel, wilayahNama, total));
       // Tombol "Cukupkan" baru muncul bila data sudah cukup banyak
       if (total >= CUKUPKAN_MIN_DATA) $('cukupkan-wrap')?.classList.remove('hidden');
     }, { stopSignal: State.stopCtrl.signal, keepPartial: true });
@@ -458,7 +461,7 @@ async function startSearch() {
     }
     if (!allQids.length) {
       setLoadingStatus(null);
-      DOM.searchInput && (DOM.searchInput.placeholder = '0 hasil ditemukan');
+      DOM.searchInput && (DOM.searchInput.placeholder = msg('results-none'));
       return;
     }
 
@@ -468,7 +471,7 @@ async function startSearch() {
 
     // ===== FASE 2: Koordinat =====
     const allQidsWd = allQids.map(q => `wd:${q}`);
-    setLoadingStatus(`Memuat koordinat ${klasterNama}…`);
+    setLoadingStatus(msg('loading-coordinates', klasterLabel));
     const coords = await fetchCoordinates(allQidsWd, klasterNama, propLokasi, signal, null);
     if (signal.aborted) return;
     Object.entries(coords).forEach(([q, c]) => {
@@ -486,7 +489,7 @@ async function startSearch() {
   } catch (err) {
     if (err.name === 'AbortError') return;
     console.error('Search error:', err);
-    setLoadingStatus('Terjadi kesalahan: ' + (err.message || 'coba lagi'));
+    setLoadingStatus(msg('search-error', err.message || msg('try-again')));
   }
 }
 
@@ -494,12 +497,9 @@ async function startSearch() {
 function showPartialNote(fetched, count) {
   const note = $('hasil-partial-note');
   if (!note) return;
-  const n = count.toLocaleString('id-ID');
   note.textContent = fetched.reason === 'stopped'
-    ? (count ? `Hasil sebagian: pencarian dicukupkan, menampilkan ${n} butir yang sudah tertarik.`
-             : 'Pencarian dicukupkan sebelum ada data yang tertarik.')
-    : `Hasil sebagian: penarikan terhenti karena galat (${fetched.error?.message || 'tidak diketahui'}). ` +
-      `Menampilkan ${n} butir yang sempat tertarik.`;
+    ? (count ? msg('partial-stopped', count) : msg('partial-stopped-empty'))
+    : msg('partial-error', fetched.error?.message || msg('unknown'), count);
   note.classList.remove('hidden');
 }
 
@@ -508,15 +508,15 @@ function resetHasilUI() {
   $('hasil-partial-note')?.classList.add('hidden');
   $('cukupkan-wrap')?.classList.add('hidden');
   const btnCukup = $('btn-cukupkan');
-  if (btnCukup) { btnCukup.disabled = false; btnCukup.textContent = 'Cukupkan pencarian'; }
+  if (btnCukup) { btnCukup.disabled = false; btnCukup.textContent = msg('stop-search'); }
   if (DOM.hasilList) DOM.hasilList.innerHTML = '';
-  if (DOM.filterWilayah) DOM.filterWilayah.innerHTML = '<option value="all">Semua Wilayah</option>';
+  if (DOM.filterWilayah) DOM.filterWilayah.innerHTML = `<option value="all">${escHtml(msg('filter-all-regions'))}</option>`;
   if (DOM.filterUrut) DOM.filterUrut.innerHTML = `
-    <option value="tahun">Urut: Tahun</option>
-    <option value="nama">Urut: Nama</option>
-    <option value="wilayah">Urut: Wilayah</option>
+    <option value="tahun">${escHtml(msg('sort-year'))}</option>
+    <option value="nama">${escHtml(msg('sort-name'))}</option>
+    <option value="wilayah">${escHtml(msg('sort-region'))}</option>
   `;
-  if (DOM.searchInput) { DOM.searchInput.value = ''; DOM.searchInput.placeholder = 'Menghitung data…'; }
+  if (DOM.searchInput) { DOM.searchInput.value = ''; DOM.searchInput.placeholder = msg('search-counting'); }
   DOM.btnArtikel?.classList.add('loading');
   DOM.btnGambar?.classList.add('loading');
   DOM.btnSemua?.classList.remove('loading');
@@ -568,7 +568,7 @@ function finishBuildResults() {
     .map(([v, l]) => `<option value="${v}">${escHtml(l)}</option>`)
     .join('');
   if (DOM.filterWilayah)
-    DOM.filterWilayah.innerHTML = '<option value="all">Semua Wilayah</option>' + provOpts;
+    DOM.filterWilayah.innerHTML = `<option value="all">${escHtml(msg('filter-all-regions'))}</option>` + provOpts;
 
   // Sort default: tahun → nama
   State.sortedIds.sort((a, b) => {
@@ -687,7 +687,7 @@ function renderGridItem(qid, index) {
 function updateSearchPlaceholder() {
   if (!DOM.searchInput) return;
   const n = State.visibleIds.length, t = State.sortedIds.length;
-  DOM.searchInput.placeholder = n === t ? `Cari dari ${n} hasil…` : `${n} dari ${t} hasil`;
+  DOM.searchInput.placeholder = n === t ? msg('search-in-results', n) : msg('search-filtered', n, t);
 }
 
 // ---------------------------------------------------------------------------
@@ -738,7 +738,7 @@ function renderDetail(qid) {
                class="detail-img js-lightbox-trigger"
                loading="lazy">
         </a>
-        <figcaption id="img-caption-${escHtml(qid)}" class="detail-caption">Memuat…</figcaption>
+        <figcaption id="img-caption-${escHtml(qid)}" class="detail-caption">${escHtml(msg('loading'))}</figcaption>
        </figure>`
     : !mediaReady
     ? `<div class="detail-media-skeleton">
@@ -746,49 +746,49 @@ function renderDetail(qid) {
        </div>`
     : `<div class="detail-no-image" id="no-image-zone-${escHtml(qid)}">
         <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" opacity=".3"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
-        <span>Belum ada foto</span>
+        <span>${escHtml(msg('detail-no-photo'))}</span>
         ${APP_USER
           ? `<div class="no-image-btns">
-               <button class="btn btn--primary btn--sm upload-foto-btn" data-qid="${escHtml(qid)}" data-title="${escHtml(r.title)}">↑ Upload Foto</button>
-               <button class="btn btn--secondary btn--sm link-foto-btn" data-qid="${escHtml(qid)}" data-title="${escHtml(r.title)}">↗ Tautkan Commons</button>
+               <button class="btn btn--primary btn--sm upload-foto-btn" data-qid="${escHtml(qid)}" data-title="${escHtml(r.title)}">↑ ${escHtml(msg('detail-upload-photo'))}</button>
+               <button class="btn btn--secondary btn--sm link-foto-btn" data-qid="${escHtml(qid)}" data-title="${escHtml(r.title)}">↗ ${escHtml(msg('detail-link-photo'))}</button>
              </div>`
-          : `<a href="/oauth/login" class="btn btn--secondary btn--sm">Masuk untuk upload</a>`}
+          : `<a href="/oauth/login" class="btn btn--secondary btn--sm">${escHtml(msg('detail-login-to-upload'))}</a>`}
        </div>`;
 
-  const kategoriNama  = State.params?.klasterNama || '';
+  const kategoriNama  = State.params?.klasterLabel || '';
   const isRawQid      = /^Q\d+$/.test(r.title);
-  const createWikiUrl = `https://id.wikipedia.org/w/index.php?title=${encodeURIComponent(r.title)}&action=edit`;
+  const createWikiUrl = `${WIKI_BASE}/w/index.php?title=${encodeURIComponent(r.title)}&action=edit`;
 
   const wikiLink = r.articleTitle
     ? `<p class="detail-wiki-link">
-         <a href="https://id.wikipedia.org/wiki/${encodeURIComponent(r.articleTitle)}"
+         <a href="${WIKI_BASE}/wiki/${encodeURIComponent(r.articleTitle)}"
             target="_blank" rel="noopener">
            <img src="/static/img/wikipedia_tiny_logo.png" alt="" width="18" height="18">
-           <span>Baca selengkapnya di Wikipedia</span>
+           <span>${escHtml(msg('detail-read-wikipedia'))}</span>
          </a>
        </p>`
     : isRawQid
     ? `<p class="detail-no-article">
-         Butir ini belum memiliki label di Wikidata.
-         <a href="https://www.wikidata.org/wiki/${escHtml(r.id)}" target="_blank" rel="noopener" class="detail-no-article-link">Lengkapi di Wikidata →</a>
+         ${escHtml(msg('detail-no-label'))}
+         <a href="https://www.wikidata.org/wiki/${escHtml(r.id)}" target="_blank" rel="noopener" class="detail-no-article-link">${escHtml(msg('detail-complete-wikidata'))} →</a>
        </p>`
     : `<p class="detail-no-article">
-         <em>${escHtml(kategoriNama || 'Artikel')}</em> ini belum memiliki artikel Wikipedia.
-         <a href="${createWikiUrl}" target="_blank" rel="noopener" class="detail-no-article-link">Tambahkan!</a>
+         ${msgHtml('detail-no-article', { html: `<em>${escHtml(kategoriNama || msg('detail-article'))}</em>` })}
+         <a href="${createWikiUrl}" target="_blank" rel="noopener" class="detail-no-article-link">${escHtml(msg('detail-add-article'))}</a>
        </p>`;
 
   el.innerHTML = `
     <div class="detail-panel">
 
       <div class="detail-back-bar">
-        <button class="detail-back-btn" id="btn-kembali-detail">← Kembali ke Hasil</button>
+        <button class="detail-back-btn" id="btn-kembali-detail">← ${escHtml(msg('detail-back'))}</button>
         <span class="detail-back-counter">${State.currentIndex >= 0 ? `${State.currentIndex + 1} / ${State.visibleIds.length}` : ''}</span>
       </div>
 
       <a href="https://www.wikidata.org/wiki/${escHtml(qid)}"
          target="_blank" rel="noopener" class="detail-title-link">
         <h2 class="detail-title${isRawQid ? ' detail-title--unlabeled' : ''}">
-          ${isRawQid ? `<span class="detail-title-qid">${escHtml(r.id)}</span><span class="detail-title-nolabel"> — belum ada label</span>` : escHtml(r.title)}
+          ${isRawQid ? `<span class="detail-title-qid">${escHtml(r.id)}</span><span class="detail-title-nolabel"> — ${escHtml(msg('detail-unlabeled'))}</span>` : escHtml(r.title)}
           <svg class="detail-title-exticon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
         </h2>
       </a>
@@ -797,7 +797,7 @@ function renderDetail(qid) {
       <div class="detail-lead">
         <div class="detail-lead-text">
           <div id="detail-excerpt-${escHtml(qid)}" class="detail-excerpt">
-            ${(r.articleTitle || r.articleTitle === undefined) ? '<p class="detail-excerpt-loading">Memuat ringkasan Wikipedia…</p>' : ''}
+            ${(r.articleTitle || r.articleTitle === undefined) ? `<p class="detail-excerpt-loading">${escHtml(msg('detail-loading-excerpt'))}</p>` : ''}
           </div>
 
           ${wikiLink}
@@ -812,24 +812,24 @@ function renderDetail(qid) {
       ${kategoriNama ? `<p class="detail-kategori">${escHtml(kategoriNama)}</p>` : ''}
 
       <div id="detail-dynprops-${escHtml(qid)}">
-        <p class="detail-excerpt-loading">Memuat detail…</p>
+        <p class="detail-excerpt-loading">${escHtml(msg('detail-loading'))}</p>
       </div>
 
       <p class="detail-wikidata-link">
         <a href="https://www.wikidata.org/wiki/${escHtml(qid)}" target="_blank" rel="noopener">
           <img src="/static/img/wikidata_tiny_logo.png" alt="" width="18" height="18">
-          <span>Lihat di Wikidata</span>
+          <span>${escHtml(msg('detail-view-wikidata'))}</span>
         </a>
       </p>
 
       ${r.commonsCat ? `<hr class="detail-hr">
       <div class="detail-galeri-section">
-        <p class="detail-galeri-heading">Galeri lainnya</p>
+        <p class="detail-galeri-heading">${escHtml(msg('detail-gallery'))}</p>
         <p class="detail-galeri-link">
           <a href="https://commons.wikimedia.org/wiki/Category:${encodeURIComponent(r.commonsCat)}"
              target="_blank" rel="noopener">
             <img src="/static/img/wikicommons_tiny_logo.png" alt="" width="18" height="18">
-            <span>Lihat di Wikimedia Commons</span>
+            <span>${escHtml(msg('detail-view-commons'))}</span>
           </a>
         </p>
       </div>` : ''}
@@ -868,9 +868,9 @@ function renderDetail(qid) {
 // DETAIL ATRIBUT PER KATEGORI (skema: SKEMA_KATEGORI di wikidata.js)
 // ---------------------------------------------------------------------------
 const INPUT_PLACEHOLDER = {
-  item:     'Ketik untuk mencari…',
-  quantity: 'Contoh: 1000',
-  time:     'Contoh: 1945 atau 1945-08-17',
+  item:     msg('input-placeholder-item'),
+  quantity: msg('input-placeholder-quantity'),
+  time:     msg('input-placeholder-time'),
   url:      'https://...',
   string:   '',
 };
@@ -881,10 +881,10 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
     `<li><span class="detail-info-key">${escHtml(key)}:</span> ${valHtml}</li>`;
   const items = [];
 
-  if (r?.provLabel) items.push(row('Wilayah', escHtml(r.provLabel)));
+  if (r?.provLabel) items.push(row(msg('region-label'), escHtml(r.provLabel)));
   if (detail.tipe) {
     const tipe = detail.tipe.split(', ').map(k => k.charAt(0).toUpperCase() + k.slice(1)).join(', ');
-    items.push(row('Tipe/Jenis', escHtml(tipe)));
+    items.push(row(msg('detail-type'), escHtml(tipe)));
   }
 
   skemaKategori(klasterNama).forEach(attr => {
@@ -899,7 +899,7 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
   let html = `<ul class="detail-info-list detail-info-list--dyn">${items.join('')}</ul>`;
 
   if (detail.wikibooks) {
-    html += `<p class="detail-wiki-link"><a href="${escHtml(detail.wikibooks)}" target="_blank" rel="noopener"><img src="/static/img/wikibook_tiny_logo.png" alt="" width="18" height="18"><span>Lihat di Wikibuku</span></a></p>`;
+    html += `<p class="detail-wiki-link"><a href="${escHtml(detail.wikibooks)}" target="_blank" rel="noopener"><img src="/static/img/wikibook_tiny_logo.png" alt="" width="18" height="18"><span>${escHtml(msg('detail-view-wikibooks'))}</span></a></p>`;
   }
 
   return html;
@@ -912,7 +912,7 @@ function renderEmptyPropRow(attr) {
   return `<li class="detail-prop-empty-row" data-pid="${escHtml(attr.pid)}">
     <span class="detail-info-key">${escHtml(attr.label)}:</span>
     <span class="prop-empty-badge">–</span>
-    <button class="js-prop-pencil prop-pencil-btn" title="Tambah nilai" aria-label="Tambah nilai" type="button">+</button>
+    <button class="js-prop-pencil prop-pencil-btn" title="${escHtml(msg('prop-add'))}" aria-label="${escHtml(msg('prop-add'))}" type="button">+</button>
     <span class="prop-edit-inline hidden">
       <span class="prop-edit-field">
         <input type="${inputType}" class="prop-edit-input${attr.type === 'item' ? ' prop-edit-input--item' : ''}"
@@ -920,8 +920,8 @@ function renderEmptyPropRow(attr) {
         ${attr.type === 'item' ? '<ul class="prop-suggest hidden" role="listbox"></ul>' : ''}
       </span>
       ${unitText ? `<span class="prop-edit-unit">${escHtml(unitText)}</span>` : ''}
-      <button class="prop-save-btn" type="button" title="Simpan">✓</button>
-      <button class="prop-cancel-btn" type="button" title="Batal">✕</button>
+      <button class="prop-save-btn" type="button" title="${escHtml(msg('button-save'))}">✓</button>
+      <button class="prop-cancel-btn" type="button" title="${escHtml(msg('button-cancel'))}">✕</button>
     </span>
   </li>`;
 }
@@ -938,7 +938,7 @@ async function loadDetailProps(qid) {
   } catch (err) {
     if (err.name === 'AbortError') return;
     const el = $(`detail-dynprops-${qid}`);
-    if (el) el.innerHTML = '<p class="detail-excerpt-loading">Gagal memuat detail.</p>';
+    if (el) el.innerHTML = `<p class="detail-excerpt-loading">${escHtml(msg('detail-load-failed'))}</p>`;
   }
 }
 
@@ -954,7 +954,7 @@ function renderDetailProps(qid) {
 function formatNilaiBaru(attr, value, itemLabel) {
   if (attr.type === 'item') return { text: itemLabel };
   if (attr.type === 'quantity') {
-    const angka = parseFloat(value).toLocaleString('id-ID', { maximumFractionDigits: 2 });
+    const angka = formatNumber(parseFloat(value), { maximumFractionDigits: 2 });
     return { text: [angka, attr.unitLabel || attr.suffix || ''].filter(Boolean).join(' ') };
   }
   if (attr.type === 'time') {
@@ -995,12 +995,12 @@ function attachPropEditHandlers(qid, container) {
 
     if (attr.type === 'item') {
       if (!input.dataset.qid) {
-        appShowDialog('Pilih salah satu butir dari daftar saran.', 'alert', 'Perhatian');
+        appShowDialog(escHtml(msg('prop-choose-item')), 'alert', msg('dialog-attention'));
         return;
       }
       value = input.dataset.qid;
     } else if (attr.type === 'time' && !/^\d{1,4}(-\d{2}(-\d{2})?)?$/.test(value)) {
-      appShowDialog('Format tanggal: TTTT, TTTT-BB, atau TTTT-BB-HH (contoh: 1945-08-17).', 'alert', 'Perhatian');
+      appShowDialog(escHtml(msg('prop-date-invalid')), 'alert', msg('dialog-attention'));
       return;
     }
 
@@ -1016,7 +1016,7 @@ function attachPropEditHandlers(qid, container) {
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        appShowDialog(data.error || 'Gagal menyimpan.', 'alert', 'Kesalahan');
+        appShowDialog(escHtml(data.error || msg('save-failed')), 'alert', msg('dialog-error'));
         btn.disabled    = false;
         btn.textContent = '✓';
         return;
@@ -1028,7 +1028,7 @@ function attachPropEditHandlers(qid, container) {
         renderDetailProps(qid);
       }
     } catch (err) {
-      appShowDialog(`Error: ${err.message}`, 'alert', 'Kesalahan');
+      appShowDialog(escHtml(msg('error-generic', err.message)), 'alert', msg('dialog-error'));
       btn.disabled    = false;
       btn.textContent = '✓';
     }
@@ -1166,7 +1166,7 @@ function buildMapPopupHtml(r) {
     : '';
   const isMobile = window.innerWidth <= 800;
   const btnHtml  = isMobile
-    ? `<button class="popup-lihat-detail" data-qid="${escHtml(r.id)}">Lihat Detail →</button>`
+    ? `<button class="popup-lihat-detail" data-qid="${escHtml(r.id)}">${escHtml(msg('popup-view-detail'))} →</button>`
     : '';
   return `
     <div class="map-popup">
@@ -1240,9 +1240,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Form
-  enhanceSearchableSelect(DOM.selectProvinsi, 'Ketik atau pilih provinsi…');
-  enhanceSearchableSelect(DOM.selectNegara, 'Ketik atau pilih negara…');
-  enhanceSearchableSelect(DOM.selectKategori, 'Ketik atau pilih kategori…');
+  enhanceSearchableSelect(DOM.selectProvinsi, msg('region-province-placeholder'));
+  enhanceSearchableSelect(DOM.selectNegara, msg('region-country-placeholder'));
+  enhanceSearchableSelect(DOM.selectKategori, msg('category-combo-placeholder'));
   updateFormVisibility();
   DOM.selectTipe?.addEventListener('change', updateFormVisibility);
   initWilayahSearch();
@@ -1252,7 +1252,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Cukupkan: hentikan penarikan, tampilkan data yang sudah masuk
   $('btn-cukupkan')?.addEventListener('click', e => {
     e.currentTarget.disabled = true;
-    e.currentTarget.textContent = 'Menghentikan…';
+    e.currentTarget.textContent = msg('stopping');
     State.stopCtrl?.abort();
   });
 
@@ -1275,13 +1275,15 @@ document.addEventListener('DOMContentLoaded', () => {
   DOM.btnSemua?.addEventListener('click',   () => { State.viewMode = 'list'; State.filter.mediaOnly = null;      applyFilter(); });
 
   // Buka halaman Perkaya Data dengan wilayah & kategori pencarian saat ini
-  $('btn-perkaya')?.addEventListener('click', e => {
+  $('btn-enrich')?.addEventListener('click', e => {
     const p = State.params;
     if (!p) return;
     e.preventDefault();
-    const q = new URLSearchParams({ tipe: p.wilayah, kategori: p.klasterNama });
-    if (p.provQid)   q.set('prov', p.provQid);
-    if (p.negaraQid) q.set('negara', p.negaraQid);
+    const region = { provinsi: 'province', all: 'all', luar_negeri: 'abroad' }[p.wilayah];
+    const q = new URLSearchParams({ category: p.klasterSlug });
+    if (region) q.set('region', region);
+    if (region === 'province') q.set('province', p.provQid.replace(/^wd:/, ''));
+    if (p.negaraQid) q.set('country', p.negaraQid.replace(/^wd:/, ''));
     location.href = `${e.currentTarget.getAttribute('href')}?${q}`;
   });
 
@@ -1361,7 +1363,7 @@ function initLinkPhotoModal() {
     $('link-photo-status').classList.add('hidden');
     submitBtn.disabled = true;
     submitBtn.classList.remove('loading');
-    $('link-photo-btn-label').textContent = 'Tautkan ke Wikidata';
+    $('link-photo-btn-label').textContent = msg('link-photo-submit');
     modal._qid = null;
   };
 
@@ -1383,7 +1385,7 @@ function initLinkPhotoModal() {
       previewImg.onerror = () => {
         previewArea.classList.add('hidden');
         submitBtn.disabled = true;
-        setLinkPhotoStatus('error', 'File tidak ditemukan di Commons. Periksa ejaan nama file.');
+        setLinkPhotoStatus('error', msg('link-photo-not-found'));
       };
     }, 600);
   });
@@ -1395,8 +1397,8 @@ function initLinkPhotoModal() {
 
     submitBtn.disabled = true;
     submitBtn.classList.add('loading');
-    $('link-photo-btn-label').textContent = 'Menautkan…';
-    setLinkPhotoStatus('info', 'Menambahkan P18 ke Wikidata…');
+    $('link-photo-btn-label').textContent = msg('link-photo-linking');
+    setLinkPhotoStatus('info', msg('link-photo-adding'));
 
     try {
       const res  = await fetch(`/api/item/${qid}/set-image`, {
@@ -1407,10 +1409,10 @@ function initLinkPhotoModal() {
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        setLinkPhotoStatus('error', data.error || 'Gagal menautkan.');
+        setLinkPhotoStatus('error', data.error || msg('link-photo-failed'));
         submitBtn.disabled = false;
         submitBtn.classList.remove('loading');
-        $('link-photo-btn-label').textContent = 'Tautkan ke Wikidata';
+        $('link-photo-btn-label').textContent = msg('link-photo-submit');
         return;
       }
 
@@ -1418,16 +1420,16 @@ function initLinkPhotoModal() {
         State.records[qid].imageFilename = data.filename;
         mapRefreshMarkerIcon(State.records[qid]);
       }
-      setLinkPhotoStatus('success', '✓ Foto berhasil ditautkan ke Wikidata (P18).');
-      $('link-photo-btn-label').textContent = 'Selesai';
+      setLinkPhotoStatus('success', `✓ ${msg('link-photo-success')}`);
+      $('link-photo-btn-label').textContent = msg('button-done');
 
       setTimeout(() => { closeModal(); renderDetail(qid); }, 1500);
 
     } catch (err) {
-      setLinkPhotoStatus('error', `Error: ${err.message}`);
+      setLinkPhotoStatus('error', msg('error-generic', err.message));
       submitBtn.disabled = false;
       submitBtn.classList.remove('loading');
-      $('link-photo-btn-label').textContent = 'Tautkan ke Wikidata';
+      $('link-photo-btn-label').textContent = msg('link-photo-submit');
     }
   });
 }
@@ -1469,7 +1471,7 @@ function initUploadModal() {
     $('upload-status').classList.add('hidden');
     submitBtn.disabled = true;
     submitBtn.classList.remove('loading');
-    $('upload-btn-label').textContent = 'Upload';
+    $('upload-btn-label').textContent = msg('upload-submit');
     modal._qid = null;
   };
 
@@ -1497,8 +1499,8 @@ function initUploadModal() {
   });
 
   function handleFileSelect(file) {
-    if (!file.type.startsWith('image/')) return setUploadStatus('error', 'Hanya file gambar yang diterima.');
-    if (file.size > 10 * 1024 * 1024) return setUploadStatus('error', 'Ukuran file melebihi 10 MB.');
+    if (!file.type.startsWith('image/')) return setUploadStatus('error', msg('upload-images-only'));
+    if (file.size > 10 * 1024 * 1024) return setUploadStatus('error', msg('upload-too-large', 10));
 
     const reader = new FileReader();
     reader.onload = e => {
@@ -1526,13 +1528,13 @@ function initUploadModal() {
     const filename = $('upload-filename').value.trim();
     const caption  = $('upload-caption').value.trim();
 
-    if (!file)     return setUploadStatus('error', 'Pilih foto terlebih dahulu.');
-    if (!filename) return setUploadStatus('error', 'Nama file tidak boleh kosong.');
+    if (!file)     return setUploadStatus('error', msg('upload-choose-photo'));
+    if (!filename) return setUploadStatus('error', msg('upload-filename-required'));
 
     submitBtn.disabled = true;
     submitBtn.classList.add('loading');
-    $('upload-btn-label').textContent = 'Mengunggah…';
-    setUploadStatus('info', 'Mengupload ke Commons dan memperbarui Wikidata…');
+    $('upload-btn-label').textContent = msg('upload-uploading');
+    setUploadStatus('info', msg('upload-in-progress'));
 
     const fd = new FormData();
     fd.append('file',     file);
@@ -1544,10 +1546,10 @@ function initUploadModal() {
       const data = await res.json();
 
       if (!res.ok || data.error) {
-        setUploadStatus('error', data.error || 'Upload gagal.');
+        setUploadStatus('error', data.error || msg('upload-failed'));
         submitBtn.disabled = false;
         submitBtn.classList.remove('loading');
-        $('upload-btn-label').textContent = 'Upload';
+        $('upload-btn-label').textContent = msg('upload-submit');
         return;
       }
 
@@ -1558,12 +1560,12 @@ function initUploadModal() {
       }
 
       if (data.warning) {
-        setUploadStatus('warning', `✓ Berhasil upload ke Commons! Tapi: ${data.warning}`);
+        setUploadStatus('warning', `✓ ${msg('upload-success-warning', data.warning)}`);
       } else {
-        setUploadStatus('success', `✓ Foto berhasil diupload dan ditambahkan ke Wikidata (P18).`);
+        setUploadStatus('success', `✓ ${msg('upload-success')}`);
       }
 
-      $('upload-btn-label').textContent = 'Selesai';
+      $('upload-btn-label').textContent = msg('button-done');
 
       // Tunggu sebentar lalu tutup dan refresh detail
       setTimeout(() => {
@@ -1572,10 +1574,10 @@ function initUploadModal() {
       }, 1800);
 
     } catch (err) {
-      setUploadStatus('error', `Error: ${err.message}`);
+      setUploadStatus('error', msg('error-generic', err.message));
       submitBtn.disabled = false;
       submitBtn.classList.remove('loading');
-      $('upload-btn-label').textContent = 'Upload';
+      $('upload-btn-label').textContent = msg('upload-submit');
     }
   });
 }

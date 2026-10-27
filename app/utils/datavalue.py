@@ -8,6 +8,8 @@ import re
 from datetime import date
 from decimal import Decimal, InvalidOperation
 
+from ..i18n import msg
+
 DATATYPES = ('item', 'quantity', 'time', 'url', 'string')
 CALENDAR_GREGORIAN = 'http://www.wikidata.org/entity/Q1985727'
 
@@ -59,11 +61,11 @@ def build_value(datatype, val, unit_qid=''):
     """
     val = (val or '').strip()
     if not val:
-        raise DataValueError('Nilai tidak boleh kosong')
+        raise DataValueError(msg('value-empty'))
 
     if datatype == 'item':
         if not re.fullmatch(r'Q\d+', val.upper()):
-            raise DataValueError('Nilai harus berupa Q-ID butir Wikidata')
+            raise DataValueError(msg('value-not-qid'))
         return json.dumps({'entity-type': 'item', 'numeric-id': int(val[1:])})
 
     if datatype == 'quantity':
@@ -72,26 +74,26 @@ def build_value(datatype, val, unit_qid=''):
             if not num.is_finite():
                 raise InvalidOperation
         except InvalidOperation:
-            raise DataValueError('Nilai harus berupa angka') from None
+            raise DataValueError(msg('value-not-number')) from None
         if unit_qid and not re.fullmatch(r'Q\d+', unit_qid):
-            raise DataValueError('Satuan tidak valid')
+            raise DataValueError(msg('value-bad-unit'))
         unit_url = f'http://www.wikidata.org/entity/{unit_qid}' if unit_qid else '1'
         return json.dumps({'amount': f'{num.normalize():+f}', 'unit': unit_url})
 
     if datatype == 'url':
         if not re.match(r'^https?://', val):
-            raise DataValueError('URL harus diawali https:// atau http://')
+            raise DataValueError(msg('value-bad-url'))
         return json.dumps(val)
 
     if datatype == 'time':
         time_value = parse_time(val)
         if not time_value:
-            raise DataValueError('Tanggal tidak valid (format TTTT, TTTT-BB, atau TTTT-BB-HH; tahun 1–2100)')
+            raise DataValueError(msg('value-bad-date'))
         return json.dumps(time_value)
 
     if datatype == 'string':
         if len(val) > 400:
-            raise DataValueError('Teks terlalu panjang (maks. 400 karakter)')
+            raise DataValueError(msg('value-too-long', 400))
         return json.dumps(val)
 
-    raise DataValueError(f'Tipe data "{datatype}" belum didukung')
+    raise DataValueError(msg('value-bad-datatype', datatype))

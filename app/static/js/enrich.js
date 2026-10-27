@@ -1,7 +1,7 @@
 'use strict';
 
 /* ==========================================================================
-   perkaya.js — Halaman Perkaya Data: cek kelengkapan atribut, cari nilai
+   enrich.js — Halaman Perkaya Data (/enrich): cek kelengkapan atribut, cari nilai
    yang kosong dengan AI, validasi kandidat, lalu simpan ke Wikidata.
    Butuh: ui.js (helper UI), wikidata.js (query & skema kategori).
    ========================================================================== */
@@ -28,6 +28,9 @@ const PK = {
 
 const cellKey = (qid, pid) => `${qid}|${pid}`;
 
+// Nilai ?region= di URL (bahasa Inggris) ↔ nilai internal dropdown tipe wilayah
+const REGION_FROM_PARAM = { province: 'provinsi', all: 'all', abroad: 'luar_negeri' };
+
 // ---------------------------------------------------------------------------
 // PENGATURAN AI (disimpan di localStorage browser)
 // ---------------------------------------------------------------------------
@@ -47,7 +50,7 @@ function updateProviderBadge() {
   const s = loadSettings();
   const badge = $('pk-provider-badge');
   if (!badge) return;
-  badge.textContent = s.keys[s.provider] ? `· ${PROVIDER_LABEL[s.provider]}` : '· belum diatur';
+  badge.textContent = `· ${s.keys[s.provider] ? PROVIDER_LABEL[s.provider] : msg('pk-provider-unset')}`;
   badge.classList.toggle('pk-provider-badge--warn', !s.keys[s.provider]);
 }
 
@@ -107,7 +110,8 @@ function readParams() {
   if (!opt || !opt.value) return null;
   return {
     jenis:       opt.value,
-    klasterNama: opt.textContent.trim(),
+    klasterNama: opt.dataset.klaster,      // kunci internal (nama Indonesia), tidak diterjemahkan
+    klasterLabel: opt.textContent.trim(),  // teks tampilan sesuai bahasa
     propLokasi:  opt.dataset.lokasi || 'P131',
     propTahun:   opt.dataset.tahun || 'P571',
     useSubclass: opt.dataset.subclass === '1',
@@ -117,7 +121,11 @@ function readParams() {
   };
 }
 
-/** Isi form dari query string, mis. tautan "Perkaya data ini" dari halaman Jelajah. */
+/**
+ * Isi form dari query string, mis. tautan "Perkaya data ini" dari halaman Jelajah:
+ * ?region=province|all|abroad&province=Q3125978&country=Q17&category=museums
+ * (category = slug kunci pesan kategori, lihat data-slug di template).
+ */
 function applyQueryParams() {
   const q = new URLSearchParams(location.search);
   const setSelect = (id, val) => {
@@ -127,11 +135,12 @@ function applyQueryParams() {
     el.dispatchEvent(new Event('change'));
     return true;
   };
-  setSelect('pk-wilayah-tipe', q.get('tipe'));
-  setSelect('pk-provinsi', q.get('prov'));
-  setSelect('pk-negara', q.get('negara'));
-  const kat = q.get('kategori');
-  const opt = kat && [...$('pk-kategori').options].find(o => o.textContent.trim() === kat);
+  const wdQid = v => v && `wd:${v.replace(/^wd:/, '')}`;
+  setSelect('pk-wilayah-tipe', REGION_FROM_PARAM[q.get('region')]);
+  setSelect('pk-provinsi', wdQid(q.get('province')));
+  setSelect('pk-negara', wdQid(q.get('country')));
+  const slug = q.get('category');
+  const opt = slug && [...$('pk-kategori').options].find(o => o.dataset.slug === slug);
   if (opt) {
     $('pk-kategori').value = opt.value;
     $('pk-kategori').dispatchEvent(new Event('change'));
@@ -151,9 +160,10 @@ function setLoading(text) {
 
 async function loadItems() {
   const params = readParams();
-  if (!params) { appShowDialog('Pilih kategori terlebih dahulu.', 'alert', 'Perhatian'); return; }
+  if (!params) { appShowDialog(escHtml(msg('pk-category-required')), 'alert', msg('dialog-attention')); return; }
 
   PK.kategori  = params.klasterNama;
+  PK.kategoriLabel = params.klasterLabel;
   PK.skema     = skemaKategori(params.klasterNama);
   PK.items     = [];
   PK.itemsById = {};
@@ -164,7 +174,7 @@ async function loadItems() {
 
   try {
     // 1. Daftar butir (SPARQL yang sama dengan halaman Jelajah)
-    setLoading(`Mengambil ${params.klasterNama}…`);
+    setLoading(msg('pk-fetching', params.klasterLabel));
     const seen = new Set();
     await fetchAllPages(
       (limit, offset) => buildItemsQuery({ ...params, limit, offset }),
@@ -183,13 +193,13 @@ async function loadItems() {
         PK.items.push(item);
         PK.itemsById[qid] = item;
       },
-      total => setLoading(`Mengambil ${params.klasterNama}… ${Math.min(total, PK_MAX_ITEMS)} butir`),
+      total => setLoading(msg('pk-fetching-count', params.klasterLabel, Math.min(total, PK_MAX_ITEMS))),
     );
 
     if (!PK.items.length) {
       setLoading(null);
       $('pk-empty').classList.remove('hidden');
-      $('pk-empty').innerHTML = '<p>Tidak ada butir untuk pilihan ini.</p>';
+      $('pk-empty').innerHTML = `<p>${escHtml(msg('pk-no-items'))}</p>`;
       return;
     }
 
@@ -202,22 +212,22 @@ async function loadItems() {
       await Promise.all(chunks.slice(i, i + 3).map(async ids => {
         const data = await _wbGet({
           action: 'wbgetentities', ids: ids.join('|'),
-          props: 'claims|descriptions', languages: 'id|en',
+          props: 'claims|descriptions', languages: WD_LANGS.join('|'),
         });
         Object.entries(data.entities || {}).forEach(([qid, e]) => {
           const item = PK.itemsById[qid];
           if (!item) return;
-          item.description = e.descriptions?.id?.value || e.descriptions?.en?.value || '';
+          item.description = pickLang(e.descriptions);
           claimsById[qid] = e.claims || {};
           attrLabelIds(claimsById[qid], PK.skema).forEach(id => labelIds.add(id));
         });
       }));
       done += Math.min(3, chunks.length - i);
-      setLoading(`Memeriksa kelengkapan… ${Math.round(done / chunks.length * 100)}%`);
+      setLoading(msg('pk-checking', Math.round(done / chunks.length * 100)));
     }
 
     // 3. Label untuk nilai bertipe butir (mis. Lokasi) & satuan, sekaligus untuk semua butir
-    setLoading('Memuat label nilai…');
+    setLoading(msg('pk-loading-labels'));
     const labels = labelIds.size ? await fetchLabels([...labelIds]) : {};
     Object.entries(claimsById).forEach(([qid, claims]) => {
       PK.itemsById[qid].values = formatAttrValues(claims, PK.skema, labels);
@@ -232,7 +242,7 @@ async function loadItems() {
     console.error(err);
     setLoading(null);
     $('pk-empty').classList.remove('hidden');
-    $('pk-empty').innerHTML = `<p>Gagal memuat data: ${escHtml(err.message || 'coba lagi')}</p>`;
+    $('pk-empty').innerHTML = `<p>${escHtml(msg('pk-load-failed', err.message || msg('try-again')))}</p>`;
   } finally {
     $('pk-btn-muat').disabled = false;
   }
@@ -249,12 +259,12 @@ function cellState(item, attr) {
 }
 
 const CELL_VIEW = {
-  empty:     { ico: '○', cls: 'empty',    title: 'Kosong — klik untuk memilih' },
-  pending:   { ico: '◐', cls: 'pending',  title: 'Ada kandidat — klik untuk memvalidasi' },
-  not_found: { ico: '–', cls: 'notfound', title: 'AI tidak menemukan' },
-  error:     { ico: '!', cls: 'error',    title: 'Gagal' },
-  queued:    { ico: '…', cls: 'queued',   title: 'Dalam antrean' },
-  searching: { ico: '',  cls: 'searching', title: 'Sedang dicari…' },
+  empty:     { ico: '○', cls: 'empty',    title: msg('pk-cell-empty') },
+  pending:   { ico: '◐', cls: 'pending',  title: msg('pk-cell-pending') },
+  not_found: { ico: '–', cls: 'notfound', title: msg('pk-legend-notfound') },
+  error:     { ico: '!', cls: 'error',    title: msg('pk-cell-error') },
+  queued:    { ico: '…', cls: 'queued',   title: msg('pk-cell-queued') },
+  searching: { ico: '',  cls: 'searching', title: msg('pk-cell-searching') },
 };
 
 function cellHtml(item, attr) {
@@ -285,16 +295,18 @@ function visibleItems() {
 function renderMatrix() {
   const total      = PK.items.length;
   const incomplete = PK.items.filter(isIncomplete).length;
-  $('pk-summary-text').innerHTML =
-    `<strong>${escHtml(PK.kategori)}</strong> · ${total} butir` +
-    `${total >= PK_MAX_ITEMS ? ` (dibatasi ${PK_MAX_ITEMS} pertama — persempit wilayah)` : ''}` +
-    ` · ${total - incomplete} lengkap · <strong>${incomplete} belum lengkap</strong>`;
+  $('pk-summary-text').innerHTML = [
+    `<strong>${escHtml(PK.kategoriLabel)}</strong>`,
+    escHtml(msg('pk-summary-items', total) + (total >= PK_MAX_ITEMS ? ' ' + msg('pk-summary-limited', PK_MAX_ITEMS) : '')),
+    escHtml(msg('pk-summary-complete', total - incomplete)),
+    `<strong>${escHtml(msg('pk-summary-incomplete', incomplete))}</strong>`,
+  ].join(' · ');
 
   const head = PK.skema.map(attr => {
     return `<th class="pk-col">
       <span class="pk-col-label">${escHtml(attr.label)}</span>
       <span class="pk-col-meta">${escHtml(attr.pid)}</span>
-      <button class="pk-col-select" data-pid="${escHtml(attr.pid)}" type="button">pilih kosong</button>
+      <button class="pk-col-select" data-pid="${escHtml(attr.pid)}" type="button">${escHtml(msg('pk-select-empty'))}</button>
     </th>`;
   }).join('');
 
@@ -308,8 +320,8 @@ function renderMatrix() {
     </tr>`).join('');
 
   $('pk-matrix').innerHTML = `
-    <thead><tr><th class="pk-row-head">Butir</th>${head}</tr></thead>
-    <tbody>${rows || `<tr><td colspan="${PK.skema.length + 1}" class="pk-empty-text">Tidak ada butir yang cocok.</td></tr>`}</tbody>`;
+    <thead><tr><th class="pk-row-head">${escHtml(msg('pk-col-item'))}</th>${head}</tr></thead>
+    <tbody>${rows || `<tr><td colspan="${PK.skema.length + 1}" class="pk-empty-text">${escHtml(msg('pk-no-match'))}</td></tr>`}</tbody>`;
   updateSelectionUi();
 }
 
@@ -331,9 +343,9 @@ function selectable(key) {
 
 function updateSelectionUi() {
   const n = PK.selected.size;
-  $('pk-selected-text').textContent = `${n} sel dipilih`;
+  $('pk-selected-text').textContent = msg('pk-selected', n);
   $('pk-btn-run').disabled = n === 0 || PK.running > 0;
-  $('pk-btn-run').textContent = n ? `✨ Cari dengan AI (${n})` : '✨ Cari dengan AI';
+  $('pk-btn-run').textContent = `✨ ${n ? msg('pk-run-count', n) : msg('pk-run')}`;
 }
 
 function toggleCell(key) {
@@ -369,7 +381,7 @@ function initMatrix() {
   $('pk-btn-stop').addEventListener('click', () => {
     PK.stopRequested = true;
     $('pk-btn-stop').disabled = true;
-    $('pk-progress').textContent = 'Menghentikan setelah pencarian yang sedang berjalan…';
+    $('pk-progress').textContent = msg('pk-stopping');
   });
 }
 
@@ -379,7 +391,7 @@ function initMatrix() {
 async function runSearch() {
   const settings = loadSettings();
   if (!settings.keys[settings.provider]) {
-    appShowDialog(`API key ${PROVIDER_LABEL[settings.provider]} belum diisi. Buka ⚙ Pengaturan AI.`, 'alert', 'Pengaturan AI');
+    appShowDialog(escHtml(msg('pk-key-missing', PROVIDER_LABEL[settings.provider])), 'alert', msg('pk-settings'));
     return;
   }
 
@@ -391,7 +403,7 @@ async function runSearch() {
   const total = PK.queue.length;
   let done = 0;
   const progress = () => {
-    $('pk-progress').textContent = `Mencari ${done}/${total} · ${PROVIDER_LABEL[settings.provider]}`;
+    $('pk-progress').textContent = msg('pk-progress', done, total, PROVIDER_LABEL[settings.provider]);
   };
   $('pk-progress').classList.remove('hidden');
   $('pk-btn-stop').classList.remove('hidden');
@@ -406,7 +418,7 @@ async function runSearch() {
       progress();
       if (fatal) {
         PK.stopRequested = true;
-        appShowDialog(escHtml(fatal), 'alert', 'Pencarian dihentikan');
+        appShowDialog(escHtml(fatal), 'alert', msg('pk-search-stopped'));
       }
     }
   };
@@ -421,7 +433,7 @@ async function runSearch() {
   PK.queue = [];
 
   $('pk-btn-stop').classList.add('hidden');
-  $('pk-progress').textContent = `Selesai: ${done} dari ${total} dicari`;
+  $('pk-progress').textContent = msg('pk-progress-done', done, total);
   updateSelectionUi();
   renderQueue();
 }
@@ -435,7 +447,7 @@ async function searchCell(key, settings) {
   refreshCell(key);
 
   try {
-    const res = await fetch('/api/perkaya/search', {
+    const res = await fetch('/api/enrich/search', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -450,8 +462,9 @@ async function searchCell(key, settings) {
     if (!res.ok) {
       PK.cells[key] = { status: 'error', msg: data.error || `HTTP ${res.status}` };
       refreshCell(key);
-      const fatal = res.status === 401 || /API key|tidak punya akses|Batas pemakaian/i.test(data.error || '');
-      return fatal ? (data.error || 'Autentikasi diperlukan') : null;
+      // Galat fatal (login habis, API key salah, kuota habis) menghentikan seluruh antrean
+      const fatal = res.status === 401 || data.fatal;
+      return fatal ? (data.error || msg('pk-auth-required')) : null;
     }
     upsertOpen(data);  // satu atau lebih kandidat (bila sumber berbeda pendapat)
     PK.cells[key] = { status: data[0].status, candId: data[0].id, msg: data[0].note || '' };
@@ -466,7 +479,7 @@ async function searchCell(key, settings) {
 // KANDIDAT (server)
 // ---------------------------------------------------------------------------
 async function refreshOpenCandidates() {
-  const res = await fetch('/api/perkaya/candidates?group=open');
+  const res = await fetch('/api/enrich/candidates?group=open');
   PK.open = res.ok ? await res.json() : [];
   syncCellsFromOpen();
   renderQueue();
@@ -516,15 +529,20 @@ function pendingCells() {
 // TAB VALIDASI
 // ---------------------------------------------------------------------------
 const VERIF_VIEW = {
-  terverifikasi:       { cls: 'ok',   label: 'Kutipan terverifikasi' },
-  nilai_tidak_cocok:   { cls: 'warn', label: 'Nilai tidak ada di kutipan' },
-  nilai_di_halaman:    { cls: 'warn', label: 'Kutipan tidak persis, nilai ada di halaman' },
-  tidak_terverifikasi: { cls: 'bad',  label: 'Tidak terverifikasi' },
-  gagal_dibuka:        { cls: 'muted', label: 'Sumber tidak bisa diperiksa otomatis' },
+  terverifikasi:       { cls: 'ok',   label: msg('pk-verif-ok') },
+  nilai_tidak_cocok:   { cls: 'warn', label: msg('pk-verif-value-mismatch') },
+  nilai_di_halaman:    { cls: 'warn', label: msg('pk-verif-value-on-page') },
+  tidak_terverifikasi: { cls: 'bad',  label: msg('pk-verif-unverified') },
+  gagal_dibuka:        { cls: 'muted', label: msg('pk-verif-unchecked') },
 };
 const verifView = status => VERIF_VIEW[status] || VERIF_VIEW.gagal_dibuka;
 
 const displayValue = c => `${c.value}${c.unit_label ? ' ' + c.unit_label : ''}`;
+
+/** Label atribut & kategori dalam bahasa antarmuka (DB menyimpan teks saat pencarian dilakukan). */
+const attrLabel = c => skemaKategori(c.kategori).find(a => a.pid === c.pid)?.label || c.attr_label;
+const kategoriLabel = key =>
+  [...($('pk-kategori')?.options || [])].find(o => o.dataset.klaster === key)?.textContent.trim() || key;
 
 function renderQueue() {
   const keys  = pendingCells();
@@ -536,17 +554,17 @@ function renderQueue() {
     const opts = cellCandidates(key);
     const c = opts[0];
     const sub = opts.length > 1
-      ? `${escHtml(c.attr_label)}: ${opts.length} pilihan (${opts.map(o => escHtml(displayValue(o))).join(' / ')})`
-      : `${escHtml(c.attr_label)}: ${escHtml(displayValue(c))}`;
+      ? `${escHtml(attrLabel(c))}: ${escHtml(msg('pk-options', opts.length))} (${opts.map(o => escHtml(displayValue(o))).join(' / ')})`
+      : `${escHtml(attrLabel(c))}: ${escHtml(displayValue(c))}`;
     const v = verifView(c.verification);
     return `<li class="pk-queue-item${key === PK.currentKey ? ' active' : ''}" data-key="${escHtml(key)}">
-      <span class="pk-dot pk-dot--${opts.length > 1 ? 'warn' : v.cls}" title="${opts.length > 1 ? 'Sumber berbeda pendapat' : escHtml(v.label)}"></span>
+      <span class="pk-dot pk-dot--${opts.length > 1 ? 'warn' : v.cls}" title="${escHtml(opts.length > 1 ? msg('pk-sources-disagree') : v.label)}"></span>
       <span class="pk-queue-text">
         <span class="pk-queue-title">${escHtml(c.item_label)}</span>
         <span class="pk-queue-sub">${sub}</span>
       </span>
     </li>`;
-  }).join('') || '<li class="pk-empty-text">Tidak ada kandidat.</li>';
+  }).join('') || `<li class="pk-empty-text">${escHtml(msg('pk-queue-empty'))}</li>`;
 
   if (!keys.includes(PK.currentKey)) {
     PK.currentKey = keys[0] ?? null;
@@ -590,15 +608,15 @@ function valueEditorHtml(c) {
         <input type="text" id="pk-value-${c.id}" class="form-input" value="${escHtml(c.value)}" autocomplete="off">
         <ul class="prop-suggest hidden" role="listbox"></ul>
       </span>
-      <small class="pk-hint">Pilih butir Wikidata yang tepat, atau ketik untuk mencari yang lain.</small>
-      <ul id="pk-item-choices-${c.id}" class="pk-item-choices"><li class="pk-hint">Mencari butir yang cocok…</li></ul>`;
+      <small class="pk-hint">${escHtml(msg('pk-item-hint'))}</small>
+      <ul id="pk-item-choices-${c.id}" class="pk-item-choices"><li class="pk-hint">${escHtml(msg('pk-item-searching'))}</li></ul>`;
   }
   const type = c.datatype === 'quantity' ? 'number' : c.datatype === 'url' ? 'url' : 'text';
   return `<span class="pk-value-row">
       <input type="${type}" id="pk-value-${c.id}" class="form-input" value="${escHtml(c.value)}"${type === 'number' ? ' step="any"' : ''}>
       ${c.unit_label ? `<span class="pk-unit">${escHtml(c.unit_label)}</span>` : ''}
     </span>
-    ${c.datatype === 'time' ? '<small class="pk-hint">Format: TTTT, TTTT-BB, atau TTTT-BB-HH</small>' : ''}`;
+    ${c.datatype === 'time' ? `<small class="pk-hint">${escHtml(msg('date-format-hint'))}</small>` : ''}`;
 }
 
 /** Satu sumber. Bila sumbernya lebih dari satu, ada radio untuk memilih yang dijadikan referensi. */
@@ -609,12 +627,12 @@ function sourceHtml(c, src, index, pickable) {
   return `<li class="pk-source${pickable && index === 0 ? ' selected' : ''}">
     <div class="pk-source-head">
       ${pickable ? `<input type="radio" name="pk-ref-${c.id}" value="${index}"${index === 0 ? ' checked' : ''}
-        ${src.url ? '' : 'disabled'} aria-label="Jadikan referensi">` : ''}
-      <strong>${escHtml(src.title || host || 'Sumber')}</strong>
+        ${src.url ? '' : 'disabled'} aria-label="${escHtml(msg('pk-use-as-reference'))}">` : ''}
+      <strong>${escHtml(src.title || host || msg('pk-col-source'))}</strong>
       <span class="pk-source-verif pk-source-verif--${v.cls}" title="${escHtml(src.verify_note || '')}">${escHtml(v.label)}</span>
     </div>
     ${src.url ? `<a href="${escHtml(src.url)}" target="_blank" rel="noopener" class="pk-source-url break-all">${escHtml(src.url)} ↗</a>` : ''}
-    <blockquote class="pk-quote">${highlightQuote(c, src.quote) || '<em>Tidak ada kutipan</em>'}</blockquote>
+    <blockquote class="pk-quote">${highlightQuote(c, src.quote) || `<em>${escHtml(msg('pk-no-quote'))}</em>`}</blockquote>
   </li>`;
 }
 
@@ -624,18 +642,18 @@ function optionHtml(c, index, multi) {
   return `<section class="pk-option${multi && index === 0 ? ' selected' : ''}" data-id="${c.id}">
     ${multi ? `<label class="pk-option-head">
         <input type="radio" name="pk-option" value="${c.id}"${index === 0 ? ' checked' : ''}>
-        Pilihan ${index + 1}: <strong>${escHtml(displayValue(c))}</strong>
-        <span class="pk-option-count">· ${sources.length} sumber</span>
+        ${msgHtml('pk-option', index + 1, { html: `<strong>${escHtml(displayValue(c))}</strong>` })}
+        <span class="pk-option-count">· ${escHtml(msg('pk-source-count', sources.length))}</span>
       </label>` : ''}
     <div class="pk-field">
-      <label class="pk-field-label" for="pk-value-${c.id}">Nilai</label>
+      <label class="pk-field-label" for="pk-value-${c.id}">${escHtml(msg('pk-value'))}</label>
       <div>${valueEditorHtml(c)}</div>
     </div>
     <div class="pk-field">
-      <span class="pk-field-label">Sumber (${sources.length})</span>
+      <span class="pk-field-label">${escHtml(msg('pk-sources', sources.length))}</span>
       <div>
-        ${pickable ? '<small class="pk-hint">Pilih satu sumber yang dijadikan referensi.</small>' : ''}
-        <ol class="pk-sources">${sources.map((src, i) => sourceHtml(c, src, i, pickable)).join('') || '<li class="pk-hint">Tanpa sumber</li>'}</ol>
+        ${pickable ? `<small class="pk-hint">${escHtml(msg('pk-choose-reference'))}</small>` : ''}
+        <ol class="pk-sources">${sources.map((src, i) => sourceHtml(c, src, i, pickable)).join('') || `<li class="pk-hint">${escHtml(msg('pk-no-sources'))}</li>`}</ol>
       </div>
     </div>
   </section>`;
@@ -645,7 +663,7 @@ function renderCard() {
   const card = $('pk-card');
   const opts = PK.currentKey ? cellCandidates(PK.currentKey) : [];
   if (!opts.length) {
-    card.innerHTML = '<p class="pk-empty-text">Belum ada kandidat. Jalankan pencarian AI di tab Kelengkapan.</p>';
+    card.innerHTML = `<p class="pk-empty-text">${escHtml(msg('pk-no-candidates'))}</p>`;
     return;
   }
   const c = opts[0];
@@ -654,27 +672,27 @@ function renderCard() {
   card.innerHTML = `
     <header class="pk-card-head">
       <a href="https://www.wikidata.org/wiki/${escHtml(c.qid)}" target="_blank" rel="noopener" class="pk-card-title">${escHtml(c.item_label)}</a>
-      <span class="pk-card-sub">${escHtml(c.qid)} · ${escHtml(c.kategori || '')}</span>
+      <span class="pk-card-sub">${escHtml(c.qid)} · ${escHtml(kategoriLabel(c.kategori || ''))}</span>
     </header>
 
     <div class="pk-field">
-      <span class="pk-field-label">Atribut</span>
-      <span><a href="https://www.wikidata.org/wiki/Property:${escHtml(c.pid)}" target="_blank" rel="noopener">${escHtml(c.attr_label)} (${escHtml(c.pid)})</a></span>
+      <span class="pk-field-label">${escHtml(msg('pk-col-attribute'))}</span>
+      <span><a href="https://www.wikidata.org/wiki/Property:${escHtml(c.pid)}" target="_blank" rel="noopener">${escHtml(attrLabel(c))} (${escHtml(c.pid)})</a></span>
     </div>
 
     ${multi ? `<div class="pk-verif pk-verif--warn">
-        <strong>Sumber berbeda pendapat — ${opts.length} pilihan nilai</strong>
-        <span>Periksa sumbernya, lalu pilih satu nilai untuk disimpan. Pilihan lain akan ditolak otomatis.</span>
+        <strong>${escHtml(msg('pk-disagree-title', opts.length))}</strong>
+        <span>${escHtml(msg('pk-disagree-hint'))}</span>
       </div>` : ''}
 
     ${opts.map((o, i) => optionHtml(o, i, multi)).join('')}
 
-    ${c.note ? `<p class="pk-note">Catatan AI: ${escHtml(c.note)}</p>` : ''}
-    <p class="pk-meta">Dicari dengan ${escHtml(PROVIDER_LABEL[c.provider] || c.provider)} · ${escHtml(c.model || '')}</p>
+    ${c.note ? `<p class="pk-note">${escHtml(msg('pk-ai-note', c.note))}</p>` : ''}
+    <p class="pk-meta">${escHtml(msg('pk-searched-with', PROVIDER_LABEL[c.provider] || c.provider, c.model || ''))}</p>
 
     <div class="pk-card-actions">
-      <button id="pk-btn-reject" class="btn btn--secondary" type="button">✕ Tolak${multi ? ' semua' : ''}</button>
-      <button id="pk-btn-approve" class="btn btn--primary" type="button">✓ Setujui${multi ? ' pilihan terpilih' : ''} &amp; simpan ke Wikidata</button>
+      <button id="pk-btn-reject" class="btn btn--secondary" type="button">✕ ${escHtml(msg(multi ? 'pk-reject-all' : 'pk-reject'))}</button>
+      <button id="pk-btn-approve" class="btn btn--primary" type="button">✓ ${escHtml(msg(multi ? 'pk-approve-selected' : 'pk-approve'))}</button>
     </div>
     <p id="pk-card-status" class="pk-card-status hidden"></p>`;
 
@@ -713,7 +731,7 @@ async function renderItemChoices(c) {
           <strong>${escHtml(it.label)}</strong> <span class="pk-choice-qid">${escHtml(it.id)}</span>
           ${it.description ? `<span class="pk-choice-desc">${escHtml(it.description)}</span>` : ''}
         </button></li>`).join('')
-    : '<li class="pk-hint">Tidak ada butir yang cocok — ketik nama lain di atas.</li>';
+    : `<li class="pk-hint">${escHtml(msg('pk-item-none'))}</li>`;
 
   list.addEventListener('click', e => {
     const btn = e.target.closest('.pk-item-choice');
@@ -770,24 +788,24 @@ async function approveCurrent() {
     : { value: input.value.trim() };
   body.source_index = Number(document.querySelector(`input[name="pk-ref-${c.id}"]:checked`)?.value ?? 0);
   if (c.datatype === 'item' && !body.value_qid) {
-    setCardStatus('error', 'Pilih butir Wikidata dari daftar saran terlebih dahulu.');
+    setCardStatus('error', msg('pk-item-required'));
     input.focus();
     return;
   }
 
   setCardBusy(true);
-  setCardStatus('info', 'Menyimpan ke Wikidata…');
+  setCardStatus('info', msg('pk-saving'));
   try {
-    const res  = await fetch(`/api/perkaya/candidates/${c.id}/approve`, {
+    const res  = await fetch(`/api/enrich/candidates/${c.id}/approve`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setCardStatus('error', data.error || `Gagal (HTTP ${res.status})`);
+      setCardStatus('error', data.error || msg('pk-failed-http', res.status));
       setCardBusy(false);
       return;
     }
-    if (data.warning) appShowDialog(escHtml(data.warning), 'alert', 'Tersimpan dengan catatan');
+    if (data.warning) appShowDialog(escHtml(data.warning), 'alert', msg('pk-saved-with-warning'));
     afterResolved(PK.currentKey, data);
   } catch (err) {
     setCardStatus('error', err.message);
@@ -802,10 +820,10 @@ async function rejectCurrent() {
   setCardBusy(true);
   try {
     for (const c of opts) {
-      const res = await fetch(`/api/perkaya/candidates/${c.id}/reject`, { method: 'POST' });
+      const res = await fetch(`/api/enrich/candidates/${c.id}/reject`, { method: 'POST' });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        setCardStatus('error', data.error || 'Gagal');
+        setCardStatus('error', data.error || msg('pk-cell-error'));
         setCardBusy(false);
         return;
       }
@@ -838,31 +856,31 @@ function initValidasi() {
 // TAB RIWAYAT
 // ---------------------------------------------------------------------------
 async function loadHistory() {
-  const res = await fetch('/api/perkaya/candidates?group=history');
+  const res = await fetch('/api/enrich/candidates?group=history');
   PK.history = res.ok ? await res.json() : [];
   renderHistory();
 }
 
 function renderHistory() {
   const fmt = iso => {
-    try { return new Date(iso).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' }); }
+    try { return new Date(iso).toLocaleString(I18N.lang, { dateStyle: 'short', timeStyle: 'short' }); }
     catch { return iso; }
   };
   $('pk-history-body').innerHTML = PK.history.map(c => {
     const status = c.status === 'published'
-      ? `<span class="pk-status pk-status--ok">Terbit</span>${c.revid ? ` <a href="https://www.wikidata.org/w/index.php?diff=${c.revid}" target="_blank" rel="noopener">diff ↗</a>` : ''}`
-      : '<span class="pk-status pk-status--muted">Ditolak</span>';
+      ? `<span class="pk-status pk-status--ok">${escHtml(msg('pk-status-published'))}</span>${c.revid ? ` <a href="https://www.wikidata.org/w/index.php?diff=${c.revid}" target="_blank" rel="noopener">${escHtml(msg('pk-diff'))} ↗</a>` : ''}`
+      : `<span class="pk-status pk-status--muted">${escHtml(msg('pk-status-rejected'))}</span>`;
     const nilai = c.status === 'published' ? (c.published_value || c.value) : c.value;
     return `<tr>
       <td>${escHtml(fmt(c.updated_at))}</td>
       <td><a href="https://www.wikidata.org/wiki/${escHtml(c.qid)}" target="_blank" rel="noopener">${escHtml(c.item_label)}</a></td>
-      <td>${escHtml(c.attr_label)}</td>
+      <td>${escHtml(attrLabel(c))}</td>
       <td>${escHtml(nilai || '')}${c.unit_label && c.status === 'published' ? ' ' + escHtml(c.unit_label) : ''}</td>
       <td>${status}</td>
       <td>${(c.sources || []).filter(src => src.url).map(src =>
-        `<a href="${escHtml(src.url)}" target="_blank" rel="noopener">${escHtml(src.title || 'sumber')} ↗</a>`).join('<br>') || '–'}</td>
+        `<a href="${escHtml(src.url)}" target="_blank" rel="noopener">${escHtml(src.title || msg('pk-col-source'))} ↗</a>`).join('<br>') || '–'}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="6" class="pk-empty-text">Belum ada riwayat.</td></tr>';
+  }).join('') || `<tr><td colspan="6" class="pk-empty-text">${escHtml(msg('pk-history-empty'))}</td></tr>`;
 }
 
 // ---------------------------------------------------------------------------
@@ -882,9 +900,9 @@ function showTab(name) {
 document.addEventListener('DOMContentLoaded', () => {
   if (!$('pk-tab-kelengkapan')) return;  // belum login
 
-  enhanceSearchableSelect($('pk-provinsi'), 'Ketik atau pilih provinsi…');
-  enhanceSearchableSelect($('pk-negara'), 'Ketik atau pilih negara…');
-  enhanceSearchableSelect($('pk-kategori'), 'Ketik atau pilih kategori…');
+  enhanceSearchableSelect($('pk-provinsi'), msg('region-province-placeholder'));
+  enhanceSearchableSelect($('pk-negara'), msg('region-country-placeholder'));
+  enhanceSearchableSelect($('pk-kategori'), msg('category-combo-placeholder'));
   $('pk-wilayah-tipe').addEventListener('change', updateWilayahVisibility);
   updateWilayahVisibility();
 

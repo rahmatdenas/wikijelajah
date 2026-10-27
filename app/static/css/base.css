@@ -48,8 +48,7 @@ input, textarea, select,
   align-items: center;
   gap: var(--space-3);
   text-decoration: none;
-  margin-right: auto;  /* dorong menu ke kanan; area klik hanya selebar logo + judul */
-  min-width: 0;
+  flex-shrink: 0;
 }
 
 .top-nav-logo {
@@ -343,18 +342,24 @@ input, textarea, select,
   to   { opacity: 1; }
 }
 
-/* --- Tautan halaman di samping profil (desktop) --- */
-.top-nav-links { display: flex; gap: 2px; }
-.top-nav-link {
-  padding: 5px var(--space-3); border-radius: var(--radius-sm);
-  color: rgba(255, 255, 255, 0.75); text-decoration: none;
-  font-size: var(--text-sm); font-weight: 600;
+/* --- Tautan halaman di samping logo (kontrol segmen: halaman aktif = kotak putih) --- */
+.top-nav-links {
+  display: flex; gap: 2px; padding: 3px;
+  margin-left: var(--space-4); margin-right: auto;  /* dorong bahasa & akun ke kanan */
+  background: rgba(0, 0, 0, 0.22); border-radius: var(--radius-md);
 }
-.top-nav-link:hover { color: var(--color-white); background: rgba(255, 255, 255, 0.1); }
-.top-nav-link.active { color: var(--color-white); background: rgba(255, 255, 255, 0.18); }
-
-/* Di desktop tautan halaman tidak diulang di dropdown */
-.top-nav-menu .top-nav-menu-item--page { display: none; }
+.top-nav-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px var(--space-4); border-radius: var(--radius-sm);
+  color: rgba(255, 255, 255, 0.85); text-decoration: none;
+  font-family: var(--font-ui); font-size: 13.5px; font-weight: 600; white-space: nowrap;
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+.top-nav-link-icon { flex-shrink: 0; }
+.top-nav-link:hover { color: var(--color-white); background: rgba(255, 255, 255, 0.12); }
+.top-nav-link.active { color: var(--color-primary-dark); background: var(--color-white); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); }
+.top-nav-link:focus-visible { outline: 2px solid var(--color-white); outline-offset: 2px; }
+.top-nav-link-short { display: none; }
 
 /* --- Dropdown profil di top nav --- */
 .top-nav-menu-wrap { position: relative; }
@@ -375,3 +380,13 @@ input, textarea, select,
 .top-nav-menu-item.active { color: var(--color-primary); box-shadow: inset 3px 0 0 var(--color-primary); }
 .top-nav-menu-item--sep { font-weight: 400; }
 .top-nav-menu-item--logout { color: var(--color-primary); }
+.top-nav-menu-user {
+  display: none; padding: var(--space-3) var(--space-5);
+  font-size: var(--text-sm); color: var(--color-gray-700);
+  border-bottom: 1px solid var(--color-gray-200);
+}
+
+/* --- Tombol pilih bahasa --- */
+.top-nav-lang-toggle { font-size: var(--text-sm); font-weight: 600; }
+.top-nav-lang-code { text-transform: uppercase; }
+#top-nav-lang-menu { min-width: 170px; }
