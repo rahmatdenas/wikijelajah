@@ -24,11 +24,12 @@
 
 /* Popup */
 .leaflet-popup-content-wrapper,
-.leaflet-popup-tip { background: var(--color-primary-hover); }
+.leaflet-popup-tip { background: var(--color-surface); }
+.leaflet-popup-content-wrapper { box-shadow: var(--shadow-lg); }
 
 .leaflet-popup-content {
-  font: 600 16px/20px var(--font-ui);
-  color: var(--color-white);
+  font: 600 14px/18px var(--font-ui);
+  color: var(--color-text);
   text-align: center;
   margin: 10px 20px !important;
   min-width: 94px;
@@ -41,7 +42,7 @@
 
 /* Kontrol zoom & layers */
 .leaflet-control-zoom,
-.leaflet-control-layers { box-shadow: 0 1px 5px rgba(0, 0, 0, 0.65); }
+.leaflet-control-layers { box-shadow: var(--shadow-md) !important; border: none !important; }
 .leaflet-control-layers { border-radius: var(--radius-sm); }
 .leaflet-control-layers-toggle { width: 26px; height: 26px; background-size: 18px; }
 .leaflet-touch .leaflet-control-layers-toggle { width: 30px; height: 30px; background-size: 20px; }
@@ -84,7 +85,7 @@
 .wj-popup .leaflet-popup-content-wrapper {
   padding: 0;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
 }
 
 .wj-popup .leaflet-popup-content {
@@ -109,24 +110,25 @@
 
 .map-popup-title {
   display: block;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 700;
-  color: #fff;
+  color: var(--color-text);
   line-height: 1.35;
   margin-bottom: 3px;
 }
 
 .map-popup-sub {
-  font-size: 11px;
-  color: #888;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--color-text-muted);
   margin: 0;
 }
 
 .popup-lihat-detail {
   display: block;
   width: 100%;
-  padding: 6px 0;
-  background: var(--color-primary, #7b0d0c);
+  padding: 7px 0;
+  background: var(--color-primary);
   color: #fff;
   border: none;
   border-radius: 4px;
@@ -144,9 +146,9 @@
 /* --- Keterangan warna marker --- */
 .map-legend {
   display: flex; flex-direction: column; gap: 2px;
-  padding: 5px 8px; background: rgba(255, 255, 255, 0.92);
-  border-radius: var(--radius-sm); box-shadow: 0 1px 4px rgba(0, 0, 0, 0.2);
-  font-size: 12px; color: var(--color-gray-800); line-height: 1.5;
+  padding: 6px 10px; background: rgba(255, 255, 255, 0.95);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-md);
+  font-size: 12px; font-weight: 500; color: var(--color-gray-800); line-height: 1.5;
 }
 .map-legend-item { display: flex; align-items: center; gap: 6px; }
 .map-legend-item i {

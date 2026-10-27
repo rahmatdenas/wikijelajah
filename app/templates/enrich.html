@@ -12,13 +12,43 @@
 
 <main id="enrich-page" class="enrich-page">
 
+{% set pk_howto %}
+  <ol class="pk-howto">
+    {% for n in [1, 2, 3] %}
+    <li><span class="step-num" aria-hidden="true">{{ n }}</span><span>{{ msg('pk-how-' ~ n) }}</span></li>
+    {% endfor %}
+  </ol>
+{% endset %}
 {% if not user %}
   <section class="pk-login">
+    <span class="pk-login-icon" aria-hidden="true">✨</span>
     <h2>{{ msg('pk-login-title') }}</h2>
     <p>{{ msg('pk-login-intro') }}</p>
-    <a href="{{ url_for('auth.login', next=request.full_path) }}" class="btn btn--primary">{{ msg('nav-login') }}</a>
+    <p class="pk-howto-title">{{ msg('pk-how-title') }}</p>
+    {{ pk_howto }}
+    <div class="pk-login-actions">
+      <a href="{{ url_for('auth.login', next=request.full_path) }}" class="btn btn--primary btn--large">{{ msg('nav-login') }}</a>
+      <a href="{{ url_for('main.index') }}" data-nav-context class="btn btn--secondary btn--large">{{ msg('pk-login-explore') }}</a>
+    </div>
   </section>
 {% else %}
+
+  {# ---------------- Judul halaman ---------------- #}
+  <header class="pk-header">
+    <a href="{{ url_for('main.index') }}" id="pk-view-map" data-nav-context class="back-link">← {{ msg('pk-view-map') }}</a>
+    <h1 class="pk-title">{{ msg('nav-enrich') }}</h1>
+    <p class="pk-intro">{{ msg('pk-intro') }}</p>
+  </header>
+
+  {# ---------------- Peringatan: AI belum diatur ---------------- #}
+  <div id="pk-ai-callout" class="pk-callout hidden" role="status">
+    <span class="pk-callout-icon" aria-hidden="true">⚙</span>
+    <div class="pk-callout-text">
+      <strong>{{ msg('pk-ai-callout-title') }}</strong>
+      <span>{{ msg('pk-ai-callout-text') }}</span>
+    </div>
+    <button type="button" id="pk-btn-settings-callout" class="btn btn--primary btn--sm">{{ msg('pk-ai-callout-button') }}</button>
+  </div>
 
   {# ---------------- Pilihan data ---------------- #}
   <section class="pk-toolbar">
@@ -26,9 +56,9 @@
       <div class="form-group">
         <label class="form-label" for="pk-wilayah-tipe">{{ msg('region-label') }}</label>
         <select id="pk-wilayah-tipe" class="form-select">
-          <option value="provinsi" selected>{{ msg('region-type-province') }}</option>
-          <option value="all">{{ msg('region-type-all') }}</option>
-          <option value="luar_negeri">{{ msg('region-type-abroad') }}</option>
+          {% for value, key in [('provinsi', 'region-opt-province'), ('all', 'region-opt-all'), ('luar_negeri', 'region-opt-abroad')] %}
+          <option value="{{ value }}">{{ msg(key) }}</option>
+          {% endfor %}
         </select>
       </div>
       <div class="form-group" id="pk-wadah-provinsi">
@@ -72,19 +102,21 @@
     </button>
   </section>
 
-  {# ---------------- Tab ---------------- #}
+  {# ---------------- Langkah (tab) ---------------- #}
   <nav class="pk-tabs" role="tablist">
-    <button class="pk-tab active" data-tab="kelengkapan" role="tab">{{ msg('pk-tab-completeness') }}</button>
-    <button class="pk-tab" data-tab="validasi" role="tab">
-      {{ msg('pk-tab-validation') }} <span id="pk-count-validasi" class="pk-count hidden">0</span>
+    {% for tab, key, n in [('kelengkapan', 'pk-tab-completeness', 1), ('validasi', 'pk-tab-validation', 2), ('riwayat', 'pk-tab-history', 3)] %}
+    <button class="pk-tab{% if loop.first %} active{% endif %}" data-tab="{{ tab }}" role="tab"
+            aria-selected="{{ 'true' if loop.first else 'false' }}">
+      <span class="pk-tab-num" aria-hidden="true">{{ n }}</span>
+      <span class="pk-tab-label">{{ msg(key) }}{% if tab == 'validasi' %} <span id="pk-count-validasi" class="pk-count hidden">0</span>{% endif %}</span>
     </button>
-    <button class="pk-tab" data-tab="riwayat" role="tab">{{ msg('pk-tab-history') }}</button>
+    {% endfor %}
   </nav>
 
   {# ---------------- Tab: Kelengkapan ---------------- #}
   <section id="pk-tab-kelengkapan" class="pk-panel">
     <div id="pk-empty" class="pk-empty">
-      <p>{{ msg_html('pk-empty-intro', ('<strong>%s</strong>' | safe) % msg('pk-load')) }}</p>
+      {{ pk_howto }}
     </div>
     <div id="pk-loading" class="pk-empty hidden">
       <div class="loader loader--small"></div>
@@ -95,16 +127,9 @@
       <div class="pk-summary">
         <p id="pk-summary-text"></p>
         <div class="pk-filters">
-          <label class="pk-check"><input type="checkbox" id="pk-only-incomplete" checked> {{ msg('pk-only-incomplete') }}</label>
           <input type="search" id="pk-search" class="form-input pk-search" placeholder="{{ msg('pk-search-items') }}">
+          <label class="pk-check"><input type="checkbox" id="pk-only-incomplete" checked> {{ msg('pk-only-incomplete') }}</label>
         </div>
-      </div>
-      <div class="pk-legend">
-        <span>{{ msg_html('pk-legend-filled', ('<span class="pk-legend-value">%s</span>' | safe) % msg('pk-value')) }}</span>
-        <span><b class="pk-cell-ico pk-ico--empty">○</b> {{ msg('pk-legend-empty') }}</span>
-        <span><b class="pk-cell-ico pk-ico--pending">◐</b> {{ msg('pk-legend-pending') }}</span>
-        <span><b class="pk-cell-ico pk-ico--notfound">–</b> {{ msg('pk-legend-notfound') }}</span>
-        <span><b class="pk-cell-ico pk-ico--error">!</b> {{ msg('pk-legend-error') }}</span>
       </div>
       <div class="pk-table-scroll">
         <table id="pk-matrix" class="pk-matrix"></table>
@@ -113,6 +138,7 @@
 
     <div id="pk-actionbar" class="pk-actionbar hidden">
       <span id="pk-selected-text">{{ msg('pk-selected', 0) }}</span>
+      <span id="pk-select-hint" class="pk-select-hint">{{ msg('pk-select-hint') }}</span>
       <button id="pk-btn-clear" class="btn btn--secondary btn--sm" type="button">{{ msg('pk-clear-selection') }}</button>
       <span class="pk-actionbar-spacer"></span>
       <span id="pk-progress" class="pk-progress hidden"></span>
@@ -149,51 +175,8 @@
 {% endif %}
 </main>
 
-{# ---------------- Modal: Pengaturan AI ---------------- #}
-<div id="pk-settings" class="upload-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="pk-settings-title">
-  <div class="upload-modal-box">
-    <div class="upload-modal-header">
-      <h3 id="pk-settings-title">{{ msg('pk-settings') }}</h3>
-      <button class="upload-modal-close" id="pk-settings-close" aria-label="{{ msg('button-close') }}">&times;</button>
-    </div>
-    <div class="upload-modal-body">
-      <div class="form-group">
-        <label class="form-label" for="pk-set-provider">{{ msg('pk-set-provider') }}</label>
-        <select id="pk-set-provider" class="form-select">
-          <option value="claude">Claude (Anthropic)</option>
-          <option value="openai">OpenAI</option>
-          <option value="gemini">Gemini (Google)</option>
-          <option value="groq">Groq</option>
-        </select>
-      </div>
-      {% for key, label in [('claude', 'Claude'), ('openai', 'OpenAI'), ('gemini', 'Gemini'), ('groq', 'Groq')] %}
-      <fieldset class="pk-set-provider" data-provider="{{ key }}">
-        <legend>{{ label }}</legend>
-        <div class="form-group">
-          <label class="form-label" for="pk-set-key-{{ key }}">API key</label>
-          <input type="password" id="pk-set-key-{{ key }}" class="form-input" autocomplete="off" spellcheck="false">
-        </div>
-        <div class="form-group">
-          <label class="form-label" for="pk-set-model-{{ key }}">Model</label>
-          <input type="text" id="pk-set-model-{{ key }}" class="form-input" placeholder="{{ default_models[key] }}" spellcheck="false">
-          {% if key == 'groq' %}
-          <small class="upload-hint">{{ msg('pk-set-groq-hint', groq_search_models | join(', '), 'console.groq.com') }}</small>
-          {% endif %}
-        </div>
-      </fieldset>
-      {% endfor %}
-      <p class="upload-hint">{{ msg('pk-set-key-hint') }}</p>
-    </div>
-    <div class="upload-modal-footer">
-      <button class="btn btn--secondary" id="pk-settings-cancel">{{ msg('button-cancel') }}</button>
-      <button class="btn btn--primary" id="pk-settings-save">{{ msg('button-save') }}</button>
-    </div>
-  </div>
-</div>
-
 {% endblock %}
 
 {% block scripts %}
-<script>const PK_DEFAULT_MODELS = {{ default_models | tojson }};</script>
 <script src="{{ url_for('static', filename='js/enrich.js') }}"></script>
 {% endblock %}

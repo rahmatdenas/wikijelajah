@@ -899,6 +899,7 @@ async function fetchDetailProps(qid, klasterNama, signal) {
     tipe,
     values: formatAttrValues(claims, skema, labels),
     wikibooks: entity.sitelinks?.[`${WIKI_LANG}wikibooks`]?.url || null,
+    claims,  // semua klaim mentah: untuk "Lihat semua data" & agar properti yang sudah ada tidak ditawarkan lagi
   };
 }
 
@@ -943,4 +944,96 @@ async function searchWikidataItems(term, signal) {
     type: 'item', limit: 7,
   }, signal);
   return (data.search || []).map(s => ({ id: s.id, label: s.label || s.id, description: s.description || '' }));
+}
+
+// ---------------------------------------------------------------------------
+// PROPERTI DI LUAR SKEMA KATEGORI — "Tambah data lain" & "Lihat semua data"
+// ---------------------------------------------------------------------------
+
+// Tipe data Wikidata → tipe isian yang didukung datavalue.py; tipe lain belum bisa disunting di sini
+const WD_DATATYPE_MAP = {
+  'wikibase-item': 'item', quantity: 'quantity', time: 'time', url: 'url', string: 'string', 'external-id': 'string',
+};
+
+function _propResult(id, label, description, datatype) {
+  return { id, label: label || id, description: description || '', type: WD_DATATYPE_MAP[datatype] || null };
+}
+
+/** Saran properti untuk butir ini (PropertySuggester Wikidata); properti yang sudah ada tidak disarankan. */
+async function suggestProperties(qid, signal) {
+  const data = await _wbGet({ action: 'wbsgetsuggestions', entity: qid, language: I18N.lang, limit: 15 }, signal);
+  const ids = (data.search || []).map(s => s.id);
+  if (!ids.length) return [];
+  const ents = await _wbGet({
+    action: 'wbgetentities', ids: ids.join('|'), props: 'labels|descriptions|datatype', languages: WD_LANGS.join('|'),
+  }, signal);
+  return ids.map(id => {
+    const e = ents.entities?.[id] || {};
+    return _propResult(id, pickLang(e.labels), pickLang(e.descriptions), e.datatype);
+  });
+}
+
+/** Cari properti Wikidata berdasarkan nama (bahasa antarmuka). */
+async function searchProperties(term, signal) {
+  const data = await _wbGet({
+    action: 'wbsearchentities', search: term, language: I18N.lang, uselang: I18N.lang, type: 'property', limit: 10,
+  }, signal);
+  return (data.search || []).map(s => _propResult(s.id, s.label, s.description, s.datatype));
+}
+
+/** Satuan yang diizinkan batasan properti (P2302 "allowed units" Q21514353, kualifikator P2305). */
+async function fetchPropertyUnits(pid, signal) {
+  const data = await _wbGet({ action: 'wbgetclaims', entity: pid, property: 'P2302' }, signal);
+  const ids = [];
+  (data.claims?.P2302 || [])
+    .filter(c => _itemId(c.mainsnak.datavalue?.value) === 'Q21514353')
+    .forEach(c => (c.qualifiers?.P2305 || []).forEach(q => {
+      const id = _itemId(q.datavalue?.value);
+      if (id && !ids.includes(id)) ids.push(id);
+    }));
+  if (!ids.length) return [];
+  const labels = await fetchLabels(ids.slice(0, 15), signal);
+  return ids.slice(0, 15).map(id => ({ id, label: UNIT_SIMBOL[id] || labels[id] || id }));
+}
+
+/** Teks tampilan satu snak dengan tipe apa pun (untuk "Lihat semua data"). */
+function formatAnySnak(snak, labels) {
+  if (snak.snaktype !== 'value') return { text: msg(snak.snaktype === 'novalue' ? 'value-none' : 'value-unknown') };
+  const v = snak.datavalue?.value;
+  switch (snak.datavalue?.type) {
+    case 'wikibase-entityid': { const id = _itemId(v) || v.id; return { text: labels[id] || id }; }
+    case 'quantity': {
+      const unit = _unitQid(v.unit);
+      const angka = formatNumber(parseFloat(v.amount), { maximumFractionDigits: 2 });
+      return { text: [angka, unit ? UNIT_SIMBOL[unit] || labels[unit] || '' : ''].filter(Boolean).join(' ') };
+    }
+    case 'time': return { text: formatDate(v.time, v.precision) || v.time };
+    case 'monolingualtext': return { text: v.text };
+    case 'globecoordinate': return { text: `${v.latitude.toFixed(5)}, ${v.longitude.toFixed(5)}` };
+    case 'string':
+      if (snak.datatype === 'url') return { text: v.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, ''), url: v };
+      if (snak.datatype === 'commons-media') return { text: v, url: commonsFilePageUrl(v) };
+      return { text: v };
+    default: return { text: '' };
+  }
+}
+
+/** Semua properti butir beserta nilainya, urut nama properti. */
+async function fetchAllClaimsView(claims, signal) {
+  const ids = new Set(Object.keys(claims));
+  Object.values(claims).forEach(list => bestRankClaims(list).forEach(c => {
+    const v = c.mainsnak.datavalue?.value;
+    const id = c.mainsnak.datavalue?.type === 'wikibase-entityid' ? _itemId(v) || v?.id : null;
+    if (id) ids.add(id);
+    const unit = c.mainsnak.datavalue?.type === 'quantity' ? _unitQid(v.unit) : null;
+    if (unit && !UNIT_SIMBOL[unit]) ids.add(unit);
+  }));
+  const labels = ids.size ? await fetchLabels([...ids], signal) : {};
+  return Object.entries(claims)
+    .map(([pid, list]) => ({
+      pid, label: labels[pid] || pid,
+      values: bestRankClaims(list).map(c => formatAnySnak(c.mainsnak, labels)).filter(v => v.text),
+    }))
+    .filter(row => row.values.length)
+    .sort((a, b) => a.label.localeCompare(b.label));
 }

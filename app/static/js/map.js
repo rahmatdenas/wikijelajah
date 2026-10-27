@@ -6,7 +6,7 @@
 
 // Warna marker sesuai kondisi butir. Tambah kondisi baru di sini + di mapMarkerStatus().
 const MARKER_WARNA = {
-  default: { fill: 'var(--color-primary,#7b0d0c)', stroke: 'none' },
+  default: { fill: 'var(--color-primary,#8a1414)', stroke: 'none' },
   tanpaFoto: { fill: '#f5b800', stroke: '#8a6500' },
 };
 
@@ -119,7 +119,7 @@ function mapInit(onMarkerClick) {
     const isSamePoint = bounds.getSouthWest().equals(bounds.getNorthEast());
     if (_map.getZoom() >= 18 || isSamePoint) {
       c.getChildCount() > 60
-        ? appShowDialog(`Terdapat <b>${c.getChildCount()} item</b> di satu titik. Silahkan lihat data di halaman hasil.`, 'alert', 'Titik Padat')
+        ? appShowDialog(escHtml(msg('map-dense-text', c.getChildCount())), 'alert', msg('map-dense-title'))
         : c.spiderfy();
     } else {
       _map.fitBounds(bounds);
@@ -186,6 +186,6 @@ function mapShowShape(geojson) {
   if (_shapeLayer) _map.removeLayer(_shapeLayer);
   if (!geojson) { _shapeLayer = null; return; }
   _shapeLayer = L.geoJSON(geojson, {
-    style: { color: 'var(--color-primary,#7b0d0c)', weight: 2.5, fillOpacity: 0.08 },
+    style: { color: 'var(--color-primary,#8a1414)', weight: 2.5, fillOpacity: 0.08 },
   }).addTo(_map);
 }

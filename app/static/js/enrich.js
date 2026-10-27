@@ -8,7 +8,6 @@
 
 const PK_MAX_ITEMS     = 1000;  // batas butir yang dicek sekaligus
 const PK_CONCURRENCY   = 2;     // pencarian AI paralel
-const PK_SETTINGS_KEY  = 'wj-perkaya-ai';
 
 const PK = {
   items:     [],          // [{ qid, label, description, lokasi, values: {pid: {text, url?}} }]
@@ -28,69 +27,23 @@ const PK = {
 
 const cellKey = (qid, pid) => `${qid}|${pid}`;
 
-// Nilai ?region= di URL (bahasa Inggris) ↔ nilai internal dropdown tipe wilayah
-const REGION_FROM_PARAM = { province: 'provinsi', all: 'all', abroad: 'luar_negeri' };
-
 // ---------------------------------------------------------------------------
-// PENGATURAN AI (disimpan di localStorage browser)
+// STATUS PENGATURAN AI (pengaturannya sendiri ada di ai.js)
 // ---------------------------------------------------------------------------
-function loadSettings() {
-  let s = {};
-  try { s = JSON.parse(localStorage.getItem(PK_SETTINGS_KEY) || '{}'); } catch { s = {}; }
-  return { provider: s.provider || 'claude', keys: s.keys || {}, models: s.models || {} };
-}
-
-function saveSettings(s) {
-  try { localStorage.setItem(PK_SETTINGS_KEY, JSON.stringify(s)); } catch {}
-}
-
-const PROVIDER_LABEL = { claude: 'Claude', openai: 'OpenAI', gemini: 'Gemini', groq: 'Groq' };
-
 function updateProviderBadge() {
   const s = loadSettings();
   const badge = $('pk-provider-badge');
   if (!badge) return;
   badge.textContent = `· ${s.keys[s.provider] ? PROVIDER_LABEL[s.provider] : msg('pk-provider-unset')}`;
   badge.classList.toggle('pk-provider-badge--warn', !s.keys[s.provider]);
+  // Pengguna baru: tunjukkan sejak awal bahwa AI perlu diatur sebelum mencari
+  $('pk-ai-callout')?.classList.toggle('hidden', !!s.keys[s.provider]);
 }
 
-/** Tampilkan hanya isian penyedia yang dipilih; isian lain tetap ada (tersembunyi) sehingga ikut tersimpan. */
-function showProviderFields() {
-  const provider = $('pk-set-provider').value;
-  document.querySelectorAll('.pk-set-provider').forEach(fs =>
-    fs.classList.toggle('hidden', fs.dataset.provider !== provider));
-}
-
-function openSettings() {
-  const s = loadSettings();
-  $('pk-set-provider').value = s.provider;
-  Object.keys(PROVIDER_LABEL).forEach(p => {
-    $(`pk-set-key-${p}`).value   = s.keys[p] || '';
-    $(`pk-set-model-${p}`).value = s.models[p] || '';
-  });
-  showProviderFields();
-  $('pk-settings').classList.remove('hidden');
-}
-
-function closeSettings() { $('pk-settings').classList.add('hidden'); }
-
-function initSettings() {
-  $('pk-btn-settings')?.addEventListener('click', openSettings);
-  $('pk-settings-close')?.addEventListener('click', closeSettings);
-  $('pk-settings-cancel')?.addEventListener('click', closeSettings);
-  $('pk-set-provider')?.addEventListener('change', showProviderFields);
-  $('pk-settings-save')?.addEventListener('click', () => {
-    const s = { provider: $('pk-set-provider').value, keys: {}, models: {} };
-    Object.keys(PROVIDER_LABEL).forEach(p => {
-      const key   = $(`pk-set-key-${p}`).value.trim();
-      const model = $(`pk-set-model-${p}`).value.trim();
-      if (key)   s.keys[p]   = key;
-      if (model) s.models[p] = model;
-    });
-    saveSettings(s);
-    updateProviderBadge();
-    closeSettings();
-  });
+function initSettingsUi() {
+  $('pk-btn-settings')?.addEventListener('click', () => openSettings());
+  $('pk-btn-settings-callout')?.addEventListener('click', () => openSettings());
+  document.addEventListener('wj:ai-settings', updateProviderBadge);
   updateProviderBadge();
 }
 
@@ -110,6 +63,7 @@ function readParams() {
   if (!opt || !opt.value) return null;
   return {
     jenis:       opt.value,
+    klasterSlug: opt.dataset.slug,
     klasterNama: opt.dataset.klaster,      // kunci internal (nama Indonesia), tidak diterjemahkan
     klasterLabel: opt.textContent.trim(),  // teks tampilan sesuai bahasa
     propLokasi:  opt.dataset.lokasi || 'P131',
@@ -122,12 +76,17 @@ function readParams() {
 }
 
 /**
- * Isi form dari query string, mis. tautan "Perkaya data ini" dari halaman Jelajah:
+ * Isi form dari query string, mis. tautan "Bantu lengkapi data ini" dari halaman Jelajah:
  * ?region=province|all|abroad&province=Q3125978&country=Q17&category=museums
  * (category = slug kunci pesan kategori, lihat data-slug di template).
+ * Tanpa parameter, form diisi dari pencarian terakhir (tanpa langsung memuat).
+ * Kembalikan true bila data sebaiknya langsung dimuat.
  */
 function applyQueryParams() {
   const q = new URLSearchParams(location.search);
+  const fromUrl = q.has('category');
+  const ctx = fromUrl ? Object.fromEntries(q) : loadSearchContext();
+  if (!ctx) return false;
   const setSelect = (id, val) => {
     const el = $(id);
     if (!el || !val || ![...el.options].some(o => o.value === val)) return false;
@@ -136,17 +95,25 @@ function applyQueryParams() {
     return true;
   };
   const wdQid = v => v && `wd:${v.replace(/^wd:/, '')}`;
-  setSelect('pk-wilayah-tipe', REGION_FROM_PARAM[q.get('region')]);
-  setSelect('pk-provinsi', wdQid(q.get('province')));
-  setSelect('pk-negara', wdQid(q.get('country')));
-  const slug = q.get('category');
-  const opt = slug && [...$('pk-kategori').options].find(o => o.dataset.slug === slug);
-  if (opt) {
-    $('pk-kategori').value = opt.value;
-    $('pk-kategori').dispatchEvent(new Event('change'));
-    return true;
-  }
-  return false;
+  // Wilayah bebas (Q-ID) belum didukung di sini: cukup bawa kategorinya, wilayah dipilih ulang
+  const regionOk = setSelect('pk-wilayah-tipe', REGION_FROM_PARAM[ctx.region]) && ctx.region !== 'area';
+  setSelect('pk-provinsi', wdQid(ctx.province));
+  setSelect('pk-negara', wdQid(ctx.country));
+  const opt = ctx.category && [...$('pk-kategori').options].find(o => o.dataset.slug === ctx.category);
+  if (!opt) return false;
+  $('pk-kategori').value = opt.value;
+  $('pk-kategori').dispatchEvent(new Event('change'));
+  return fromUrl && regionOk;
+}
+
+/** Konteks pilihan saat ini → simpan untuk halaman Jelajah & perbarui tautan "Lihat di peta". */
+function syncContext(params) {
+  const ctx = { region: REGION_TO_PARAM[params.wilayah], category: params.klasterSlug };
+  if (params.wilayah === 'provinsi') ctx.province = params.provQid.replace(/^wd:/, '');
+  if (params.wilayah === 'luar_negeri') ctx.country = params.negaraQid.replace(/^wd:/, '');
+  saveSearchContext(ctx);
+  const link = $('pk-view-map');
+  if (link) link.href = contextUrl(link.pathname, ctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -161,6 +128,7 @@ function setLoading(text) {
 async function loadItems() {
   const params = readParams();
   if (!params) { appShowDialog(escHtml(msg('pk-category-required')), 'alert', msg('dialog-attention')); return; }
+  syncContext(params);
 
   PK.kategori  = params.klasterNama;
   PK.kategoriLabel = params.klasterLabel;
@@ -258,27 +226,28 @@ function cellState(item, attr) {
   return PK.cells[cellKey(item.qid, attr.pid)] || { status: 'empty' };
 }
 
+// Setiap sel kosong memakai label teks pendek, sehingga tabel tidak perlu keterangan simbol
 const CELL_VIEW = {
-  empty:     { ico: '○', cls: 'empty',    title: msg('pk-cell-empty') },
-  pending:   { ico: '◐', cls: 'pending',  title: msg('pk-cell-pending') },
-  not_found: { ico: '–', cls: 'notfound', title: msg('pk-legend-notfound') },
-  error:     { ico: '!', cls: 'error',    title: msg('pk-cell-error') },
-  queued:    { ico: '…', cls: 'queued',   title: msg('pk-cell-queued') },
-  searching: { ico: '',  cls: 'searching', title: msg('pk-cell-searching') },
+  empty:     { tag: msg('pk-tag-empty'),    cls: 'empty',    title: msg('pk-cell-empty') },
+  selected:  { tag: msg('pk-tag-selected'), cls: 'selected', title: msg('pk-cell-empty') },
+  pending:   { tag: msg('pk-tag-pending'),  cls: 'pending',  title: msg('pk-cell-pending') },
+  not_found: { tag: msg('pk-tag-notfound'), cls: 'notfound', title: msg('pk-tag-notfound') },
+  error:     { tag: msg('pk-tag-error'),    cls: 'error',    title: msg('pk-cell-error') },
+  queued:    { tag: msg('pk-tag-queued'),   cls: 'queued',   title: msg('pk-cell-queued') },
+  searching: { tag: '',                     cls: 'searching', title: msg('pk-cell-searching') },
 };
 
 function cellHtml(item, attr) {
   const st   = cellState(item, attr);
-  const view = CELL_VIEW[st.status] || CELL_VIEW.empty;
   const key  = cellKey(item.qid, attr.pid);
-  const sel  = PK.selected.has(key) ? ' pk-cell--selected' : '';
+  const view = PK.selected.has(key) ? CELL_VIEW.selected : CELL_VIEW[st.status] || CELL_VIEW.empty;
   if (st.status === 'filled') {
     return `<td class="pk-cell pk-cell--filled" title="${escHtml(st.value.text)}">
               <span class="pk-cell-value">${escHtml(st.value.text)}</span></td>`;
   }
   const title = st.msg ? `${view.title}: ${st.msg}` : view.title;
-  return `<td class="pk-cell pk-cell--${view.cls}${sel}" data-key="${escHtml(key)}" title="${escHtml(title)}">
-            <span class="pk-cell-ico pk-ico--${view.cls}">${view.ico}</span></td>`;
+  return `<td class="pk-cell pk-cell--${view.cls}" data-key="${escHtml(key)}" title="${escHtml(title)}">
+            <span class="pk-tag pk-tag--${view.cls}">${escHtml(view.tag)}</span></td>`;
 }
 
 function isIncomplete(item) {
@@ -296,9 +265,7 @@ function renderMatrix() {
   const total      = PK.items.length;
   const incomplete = PK.items.filter(isIncomplete).length;
   $('pk-summary-text').innerHTML = [
-    `<strong>${escHtml(PK.kategoriLabel)}</strong>`,
     escHtml(msg('pk-summary-items', total) + (total >= PK_MAX_ITEMS ? ' ' + msg('pk-summary-limited', PK_MAX_ITEMS) : '')),
-    escHtml(msg('pk-summary-complete', total - incomplete)),
     `<strong>${escHtml(msg('pk-summary-incomplete', incomplete))}</strong>`,
   ].join(' · ');
 
@@ -344,6 +311,7 @@ function selectable(key) {
 function updateSelectionUi() {
   const n = PK.selected.size;
   $('pk-selected-text').textContent = msg('pk-selected', n);
+  $('pk-select-hint')?.classList.toggle('hidden', n > 0 || PK.running > 0);
   $('pk-btn-run').disabled = n === 0 || PK.running > 0;
   $('pk-btn-run').textContent = `✨ ${n ? msg('pk-run-count', n) : msg('pk-run')}`;
 }
@@ -391,7 +359,7 @@ function initMatrix() {
 async function runSearch() {
   const settings = loadSettings();
   if (!settings.keys[settings.provider]) {
-    appShowDialog(escHtml(msg('pk-key-missing', PROVIDER_LABEL[settings.provider])), 'alert', msg('pk-settings'));
+    openSettings(runSearch);  // isi API key dulu, lalu pencarian langsung berjalan
     return;
   }
 
@@ -447,23 +415,14 @@ async function searchCell(key, settings) {
   refreshCell(key);
 
   try {
-    const res = await fetch('/api/enrich/search', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        provider: settings.provider,
-        api_key:  settings.keys[settings.provider],
-        model:    settings.models[settings.provider] || '',
-        item: { qid, label: item.label, description: item.description, kategori: PK.kategori, lokasi: item.lokasi },
-        attr: { pid, label: attr.label, type: attr.type, unit: attr.unit || '', unit_label: attr.unitLabel || '' },
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      PK.cells[key] = { status: 'error', msg: data.error || `HTTP ${res.status}` };
+    const { ok, status, data } = await aiSearch(
+      { qid, label: item.label, description: item.description, kategori: PK.kategori, lokasi: item.lokasi },
+      attr, settings);
+    if (!ok) {
+      PK.cells[key] = { status: 'error', msg: data.error || `HTTP ${status}` };
       refreshCell(key);
       // Galat fatal (login habis, API key salah, kuota habis) menghentikan seluruh antrean
-      const fatal = res.status === 401 || data.fatal;
+      const fatal = status === 401 || data.fatal;
       return fatal ? (data.error || msg('pk-auth-required')) : null;
     }
     upsertOpen(data);  // satu atau lebih kandidat (bila sumber berbeda pendapat)
@@ -479,8 +438,7 @@ async function searchCell(key, settings) {
 // KANDIDAT (server)
 // ---------------------------------------------------------------------------
 async function refreshOpenCandidates() {
-  const res = await fetch('/api/enrich/candidates?group=open');
-  PK.open = res.ok ? await res.json() : [];
+  PK.open = await aiOpenCandidates();
   syncCellsFromOpen();
   renderQueue();
 }
@@ -503,14 +461,9 @@ function upsertOpen(cands) {
   renderQueue();
 }
 
-const VERIF_RANK = { terverifikasi: 4, nilai_di_halaman: 3, nilai_tidak_cocok: 2, gagal_dibuka: 1, tidak_terverifikasi: 0 };
-
 /** Kandidat menunggu validasi untuk satu sel: paling terverifikasi dulu, lalu yang sumbernya paling banyak. */
 function cellCandidates(key) {
-  return PK.open
-    .filter(c => c.status === 'pending' && cellKey(c.qid, c.pid) === key)
-    .sort((a, b) => (VERIF_RANK[b.verification] ?? 0) - (VERIF_RANK[a.verification] ?? 0)
-      || (b.sources?.length || 0) - (a.sources?.length || 0) || a.id - b.id);
+  return sortCandidates(PK.open.filter(c => c.status === 'pending' && cellKey(c.qid, c.pid) === key));
 }
 
 /** Daftar sel yang punya kandidat menunggu validasi, urut nama butir lalu PID. */
@@ -796,12 +749,9 @@ async function approveCurrent() {
   setCardBusy(true);
   setCardStatus('info', msg('pk-saving'));
   try {
-    const res  = await fetch(`/api/enrich/candidates/${c.id}/approve`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setCardStatus('error', data.error || msg('pk-failed-http', res.status));
+    const { ok, status, data } = await aiApprove(c.id, body);
+    if (!ok) {
+      setCardStatus('error', data.error || msg('pk-failed-http', status));
       setCardBusy(false);
       return;
     }
@@ -820,9 +770,8 @@ async function rejectCurrent() {
   setCardBusy(true);
   try {
     for (const c of opts) {
-      const res = await fetch(`/api/enrich/candidates/${c.id}/reject`, { method: 'POST' });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
+      const { ok, data } = await aiReject(c.id);
+      if (!ok) {
         setCardStatus('error', data.error || msg('pk-cell-error'));
         setCardBusy(false);
         return;
@@ -888,7 +837,10 @@ function renderHistory() {
 // ---------------------------------------------------------------------------
 function showTab(name) {
   PK.activeTab = name;
-  document.querySelectorAll('.pk-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+  document.querySelectorAll('.pk-tab').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === name);
+    b.setAttribute('aria-selected', String(b.dataset.tab === name));
+  });
   ['kelengkapan', 'validasi', 'riwayat'].forEach(t =>
     $(`pk-tab-${t}`).classList.toggle('hidden', t !== name));
   if (name === 'riwayat') loadHistory();
@@ -909,7 +861,7 @@ document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.pk-tab').forEach(b => b.addEventListener('click', () => showTab(b.dataset.tab)));
   $('pk-btn-muat').addEventListener('click', loadItems);
 
-  initSettings();
+  initSettingsUi();
   initMatrix();
   initValidasi();
   refreshOpenCandidates();

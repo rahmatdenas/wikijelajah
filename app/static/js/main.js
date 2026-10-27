@@ -53,11 +53,6 @@ const DOM = {
   btnArtikel:      null,
   btnGambar:       null,
   btnSemua:        null,
-  // Nav
-  navStandar:      null,
-  navDetail:       null,
-  btnPrev:         null,
-  btnNext:         null,
 };
 
 function initDOM() {
@@ -66,7 +61,6 @@ function initDOM() {
     landing: $('panel-landing'),
     hasil:   $('panel-hasil'),
     detail:  $('panel-details'),
-    about:   $('panel-about'),
   };
   DOM.selectTipe       = $('select-wilayah-tipe');
   DOM.wadahProvinsi    = $('wadah-provinsi');
@@ -86,11 +80,9 @@ function initDOM() {
   DOM.btnArtikel       = $('btn-jelajahi-artikel');
   DOM.btnGambar        = $('btn-jelajahi-gambar');
   DOM.btnSemua         = $('btn-semua-hasil');
-  DOM.navStandar       = $('nav-standar');
-  DOM.navDetail        = $('nav-detail');
-  DOM.btnPrev          = $('btn-prev');
-  DOM.btnNext          = $('btn-next');
 }
+
+const regionType = () => DOM.selectTipe.value;
 
 // ---------------------------------------------------------------------------
 // SECTION SWITCHING
@@ -100,11 +92,15 @@ function showSection(name) {
     el?.classList.toggle('hidden', k !== name)
   );
   _activeSection = name;
+  // Sebelumnya/Selanjutnya di detail bisa melewati batas halaman: render ulang halaman yang sesuai
+  if (name === 'hasil' && _listBuilt && State.renderedPage !== State.page) renderList();
 
-  const inDetail = (name === 'detail');
-  DOM.navDetail?.classList.toggle('hidden', !inDetail);
-  DOM.navStandar?.classList.toggle('hidden', inDetail);
-  DOM.navSubmenu?.classList.add('hidden');
+  // Di beranda: tawarkan kembali ke hasil terakhir bila ada
+  const last = $('btn-hasil-terakhir');
+  if (last) {
+    last.classList.toggle('hidden', name !== 'landing' || !State.sortedIds.length);
+    if (State.params) last.textContent = `${msg('explore-last-results', State.params.klasterLabel, State.sortedIds.length)} →`;
+  }
 
   DOM.panel?.scrollTo({ top: 0, behavior: 'smooth' });
 }
@@ -113,7 +109,7 @@ function showSection(name) {
 // FORM HELPERS
 // ---------------------------------------------------------------------------
 function updateFormVisibility() {
-  const tipe = DOM.selectTipe.value;
+  const tipe = regionType();
   DOM.wadahProvinsi.classList.toggle('hidden', tipe !== 'provinsi');
   DOM.wadahLuarNegeri.classList.toggle('hidden', tipe !== 'luar_negeri');
   DOM.wadahQidWilayah?.classList.toggle('hidden', tipe !== 'qid');
@@ -254,20 +250,60 @@ function initWilayahSearch() {
   input.addEventListener('focus', () => { if (_wilayahResults.length && !input.dataset.qid) renderWilayahSuggest(); });
 }
 
+/** Kolom Q-ID kategori hanya untuk "Ketik Q-ID Sendiri". */
 function updateQidFromKategori() {
   const opt = DOM.selectKategori.options[DOM.selectKategori.selectedIndex];
-  const val = opt?.value || '';
-  if (!DOM.inputQid) return;
-  if (val === 'custom') {
-    DOM.inputQid.value = '';
-    DOM.inputQid.readOnly = false;
-    DOM.inputQid.placeholder = msg('qid-custom-placeholder');
-    DOM.inputQid.focus();
-  } else {
-    DOM.inputQid.value = val;
-    DOM.inputQid.readOnly = true;
-    DOM.inputQid.placeholder = '';
+  const custom = opt?.value === 'custom';
+  $('wadah-qid')?.classList.toggle('hidden', !custom);
+  if (custom && DOM.inputQid) { DOM.inputQid.value = ''; DOM.inputQid.focus(); }
+}
+
+/** Pilih kategori berdasarkan slug (parameter URL). */
+function selectKategoriBySlug(slug) {
+  const opt = slug && [...DOM.selectKategori.options].find(o => o.dataset.slug === slug);
+  if (!opt) return false;
+  DOM.selectKategori.value = opt.value;
+  DOM.selectKategori.dispatchEvent(new Event('change'));
+  return true;
+}
+
+/**
+ * Isi form dari URL (tautan dari Perkaya Data, top nav, atau tautan yang dibagikan) lalu langsung cari.
+ * ?region=province|all|abroad|area&province=Q..&country=Q..&area=Q..&category=<slug>
+ */
+function applyQueryParams() {
+  const q = new URLSearchParams(location.search);
+  if (!selectKategoriBySlug(q.get('category'))) return false;
+  const tipe = REGION_FROM_PARAM[q.get('region')] || 'provinsi';
+  DOM.selectTipe.value = tipe;
+  updateFormVisibility();
+  const setSelect = (select, qid) => {
+    const val = qid && `wd:${qid.replace(/^wd:/, '')}`;
+    if (val && [...select.options].some(o => o.value === val)) {
+      select.value = val;
+      select.dispatchEvent(new Event('change'));
+    }
+  };
+  if (tipe === 'provinsi') setSelect(DOM.selectProvinsi, q.get('province'));
+  if (tipe === 'luar_negeri') setSelect(DOM.selectNegara, q.get('country'));
+  if (tipe === 'qid') {
+    const area = normalizeWilayahQid(q.get('area'));
+    if (!area) return false;
+    DOM.inputQidWilayah.value = q.get('area_label') || area.slice(3);
+    DOM.inputQidWilayah.dataset.qid = area.slice(3);
+    DOM.inputQidWilayah.dataset.label = q.get('area_label') || area.slice(3);
   }
+  return true;
+}
+
+/** Konteks pencarian (untuk URL, top nav, dan Perkaya Data). Kategori Q-ID bebas tidak bisa dibawa. */
+function searchContext(p) {
+  if (!p.klasterSlug || p.klasterSlug === 'custom') return null;
+  const ctx = { region: REGION_TO_PARAM[p.wilayah], category: p.klasterSlug };
+  if (p.wilayah === 'provinsi') ctx.province = p.provQid.replace(/^wd:/, '');
+  if (p.wilayah === 'luar_negeri') ctx.country = p.negaraQid.replace(/^wd:/, '');
+  if (p.wilayah === 'qid') ctx.area = p.provQid.replace(/^wd:/, '');
+  return ctx;
 }
 
 // ---------------------------------------------------------------------------
@@ -340,7 +376,7 @@ function _saveCache(key, records, sortedIds) {
 // Alur: langsung tampil panel hasil → item masuk progresif → marker di map
 // ---------------------------------------------------------------------------
 async function startSearch() {
-  const tipe      = DOM.selectTipe.value;
+  const tipe      = regionType();
   const provQid   = DOM.selectProvinsi.value;
   const negaraQid = DOM.selectNegara.value;
   const opt       = DOM.selectKategori.options[DOM.selectKategori.selectedIndex];
@@ -387,6 +423,24 @@ async function startSearch() {
     wilayahNegaraQid: tipe === 'qid' ? (DOM.inputQidWilayah.dataset.negara || '') : '',
     negaraQid: tipe === 'luar_negeri' ? negaraQid : '',
   };
+
+  // Bawa konteks ke URL (bisa dibagikan), top nav, dan tautan Perkaya Data
+  const ctx = searchContext(params);
+  if (ctx) {
+    saveSearchContext(ctx);
+    const q = new URLSearchParams(contextQuery(ctx));
+    if (ctx.area) q.set('area_label', wilayahNama);
+    history.replaceState(null, '', `${location.pathname}?${q}`);
+  }
+  const enrichLink = $('btn-enrich');
+  if (enrichLink) {
+    // Perkaya Data belum mendukung wilayah bebas (Q-ID) — tautan hanya untuk provinsi/nasional/luar negeri
+    const bisa = ctx && ctx.region !== 'area';
+    enrichLink.classList.toggle('hidden', !bisa);
+    if (bisa) enrichLink.href = contextUrl(enrichLink.pathname, ctx);
+  }
+  $('results-title').textContent = msg('results-title', klasterLabel, wilayahNama);
+  $('results-count').textContent = '';
 
   // Reset state
   State.records    = {};
@@ -462,6 +516,8 @@ async function startSearch() {
     if (!allQids.length) {
       setLoadingStatus(null);
       DOM.searchInput && (DOM.searchInput.placeholder = msg('results-none'));
+      $('hasil-empty')?.classList.remove('hidden');
+      $('results-count').textContent = msg('results-none');
       return;
     }
 
@@ -505,6 +561,7 @@ function showPartialNote(fetched, count) {
 
 function resetHasilUI() {
   _listBuilt = false;
+  $('hasil-empty')?.classList.add('hidden');
   $('hasil-partial-note')?.classList.add('hidden');
   $('cukupkan-wrap')?.classList.add('hidden');
   const btnCukup = $('btn-cukupkan');
@@ -520,7 +577,19 @@ function resetHasilUI() {
   DOM.btnArtikel?.classList.add('loading');
   DOM.btnGambar?.classList.add('loading');
   DOM.btnSemua?.classList.remove('loading');
+  setFilterButton('all');
+  State.viewMode = 'list';
   State.filter = { wilayah: 'all', mediaOnly: null, search: '' };
+}
+
+/** Tandai tombol filter (Semua / Ada artikel / Ada foto) yang aktif. */
+function setFilterButton(filter) {
+  [DOM.btnSemua, DOM.btnArtikel, DOM.btnGambar].forEach(btn => {
+    if (!btn) return;
+    const on = btn.dataset.filter === filter;
+    btn.classList.toggle('active', on);
+    btn.setAttribute('aria-pressed', String(on));
+  });
 }
 
 // Data gambar/artikel tersedia → aktifkan tombol Jelajahi Artikel/Gambar
@@ -540,6 +609,7 @@ async function loadMediaBackground(qids, signal, onComplete) {
       Object.assign(r, m);
       mapRefreshMarkerIcon(r);
     });
+    refreshListThumbs();
     setMediaReady();
     onComplete?.();
   } catch (e) {
@@ -550,7 +620,8 @@ async function loadMediaBackground(qids, signal, onComplete) {
 // ---------------------------------------------------------------------------
 // BUILD & RENDER RESULTS
 // ---------------------------------------------------------------------------
-const VIRTUAL_CHUNK = 40;
+// Hasil ditampilkan per halaman agar daftar ribuan butir tetap ringan & mudah ditelusuri
+const PAGE_SIZE = 50;
 
 /** Dipanggil setelah FASE 1 selesai — sort + render list + isi filter wilayah */
 function finishBuildResults() {
@@ -596,46 +667,48 @@ function applyFilter() {
     return true;
   });
 
+  State.page = 0;
   renderList();
   updateSearchPlaceholder();
+  const n = State.visibleIds.length, t = State.sortedIds.length;
+  $('results-count').textContent = n === t ? msg('results-count', t) : msg('search-filtered', n, t);
 }
 
 function renderList() {
   if (!DOM.hasilList) return;
   const isGrid = State.viewMode === 'grid';
+  const pages  = Math.max(1, Math.ceil(State.visibleIds.length / PAGE_SIZE));
+  State.page   = Math.min(State.page || 0, pages - 1);
   DOM.hasilList.className = isGrid ? 'result-grid' : 'result-list';
   DOM.hasilList.innerHTML = '';
-  let chunk = 0;
 
-  function renderChunk() {
-    const start = chunk * VIRTUAL_CHUNK;
-    const end   = Math.min(start + VIRTUAL_CHUNK, State.visibleIds.length);
-    for (let i = start; i < end; i++) {
-      if (isGrid) renderGridItem(State.visibleIds[i], i);
-      else        renderListItem(State.visibleIds[i], i);
-    }
-    chunk++;
+  const start = State.page * PAGE_SIZE;
+  const end   = Math.min(start + PAGE_SIZE, State.visibleIds.length);
+  for (let i = start; i < end; i++) {
+    if (isGrid) renderGridItem(State.visibleIds[i], i);
+    else        renderListItem(State.visibleIds[i], i);
   }
+  State.renderedPage = State.page;
+  renderPager(pages, start, end);
+}
 
-  renderChunk();
+/** Navigasi halaman di bawah daftar: ‹ Sebelumnya · 51–100 dari 1.234 · Berikutnya › */
+function renderPager(pages, start, end) {
+  const pager = $('hasil-pager');
+  if (!pager) return;
+  pager.classList.toggle('hidden', pages <= 1);
+  if (pages <= 1) return;
+  pager.innerHTML = `
+    <button type="button" class="btn btn--secondary btn--sm" data-page="${State.page - 1}"${State.page === 0 ? ' disabled' : ''}>‹ ${escHtml(msg('panel-previous'))}</button>
+    <span class="pager-info">${escHtml(msg('results-range', start + 1, end, State.visibleIds.length))}</span>
+    <button type="button" class="btn btn--secondary btn--sm" data-page="${State.page + 1}"${State.page >= pages - 1 ? ' disabled' : ''}>${escHtml(msg('panel-next'))} ›</button>`;
+}
 
-  const sentinel = document.createElement('li');
-  sentinel.setAttribute('aria-hidden', 'true');
-  sentinel.style.cssText = 'list-style:none;height:1px;pointer-events:none';
-  DOM.hasilList.appendChild(sentinel);
-
-  const container = DOM.hasilList.closest('#hasil-container') || DOM.hasilList.parentElement;
-  const observer  = new IntersectionObserver(entries => {
-    if (!entries[0].isIntersecting) return;
-    if (chunk * VIRTUAL_CHUNK < State.visibleIds.length) {
-      renderChunk();
-    } else {
-      observer.disconnect();
-      sentinel.remove();
-    }
-  }, { root: container, threshold: 0.1 });
-
-  observer.observe(sentinel);
+function goToPage(page) {
+  State.page = page;
+  renderList();
+  // Kembali ke awal daftar halaman baru
+  DOM.sections.hasil?.scrollTo({ top: $('hasil-container').offsetTop - 8, behavior: 'smooth' });
 }
 
 function renderListItem(qid, index) {
@@ -648,11 +721,17 @@ function renderListItem(qid, index) {
   li.dataset.index = index;
 
   const sub = [r.lokLabel || r.provLabel, r.yearStr].filter(Boolean).join(' · ');
+  const thumb = r.imageFilename
+    ? `<img class="result-thumb" src="${commonsFileUrl(r.imageFilename, 120)}" alt="" loading="lazy">`
+    : `<span class="result-thumb result-thumb--empty" aria-hidden="true"></span>`;
 
   li.innerHTML = `
     <span class="result-list__link">
-      ${escHtml(r.title)}
-      ${sub ? `<span class="result-list__sub">${escHtml(sub)}</span>` : ''}
+      ${thumb}
+      <span class="result-list__text">
+        <span class="result-list__title">${escHtml(r.title)}</span>
+        ${sub ? `<span class="result-list__sub">${escHtml(sub)}</span>` : ''}
+      </span>
     </span>`;
 
   li.addEventListener('click', () => openDetail(index));
@@ -682,6 +761,17 @@ function renderGridItem(qid, index) {
 
   li.addEventListener('click', () => openDetail(index));
   DOM.hasilList.appendChild(li);
+}
+
+/** Foto selesai dimuat setelah daftar tampil: isi gambar kecil tanpa merender ulang daftar. */
+function refreshListThumbs() {
+  DOM.hasilList?.querySelectorAll('.result-list__item').forEach(li => {
+    const r = State.records[li.dataset.qid];
+    const empty = li.querySelector('.result-thumb--empty');
+    if (r?.imageFilename && empty) {
+      empty.outerHTML = `<img class="result-thumb" src="${commonsFileUrl(r.imageFilename, 120)}" alt="" loading="lazy">`;
+    }
+  });
 }
 
 function updateSearchPlaceholder() {
@@ -716,11 +806,17 @@ function openDetail(index) {
   const qid = State.visibleIds[index];
   if (!qid) return;
   State.currentIndex = index;
+  State.page = Math.floor(index / PAGE_SIZE);  // kembali ke halaman hasil yang memuat butir ini
   renderDetail(qid);
   showSection('detail');
   mapFlyTo(State.records[qid]);
   updateDetailNav();
 }
+
+/** URL masuk yang kembali ke halaman ini (beserta pencariannya) setelah login. */
+const loginUrl = () => `/oauth/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+
+const ICON_EXT = '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" aria-hidden="true"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>';
 
 function renderDetail(qid) {
   const r = State.records[qid];
@@ -732,12 +828,10 @@ function renderDetail(qid) {
   const mediaReady = r.imageFilename !== undefined;
   const imgFigure = r.imageFilename
     ? `<figure class="detail-figure">
-        <a href="https://commons.wikimedia.org/wiki/File:${encodedFilename}" target="_blank" rel="noopener">
-          <img src="${commonsFileUrl(r.imageFilename, 600)}"
-               alt="${escHtml(r.title)}"
-               class="detail-img js-lightbox-trigger"
-               loading="lazy">
-        </a>
+        <img src="${commonsFileUrl(r.imageFilename, 800)}"
+             alt="${escHtml(r.title)}"
+             class="detail-img js-lightbox-trigger"
+             loading="lazy">
         <figcaption id="img-caption-${escHtml(qid)}" class="detail-caption">${escHtml(msg('loading'))}</figcaption>
        </figure>`
     : !mediaReady
@@ -745,99 +839,95 @@ function renderDetail(qid) {
          <div class="loader loader--small"></div>
        </div>`
     : `<div class="detail-no-image" id="no-image-zone-${escHtml(qid)}">
-        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" opacity=".3"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
+        <svg viewBox="0 0 24 24" width="28" height="28" fill="currentColor" opacity=".35" aria-hidden="true"><path d="M21 19V5c0-1.1-.9-2-2-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2zM8.5 13.5l2.5 3.01L14.5 12l4.5 6H5l3.5-4.5z"/></svg>
         <span>${escHtml(msg('detail-no-photo'))}</span>
         ${APP_USER
           ? `<div class="no-image-btns">
                <button class="btn btn--primary btn--sm upload-foto-btn" data-qid="${escHtml(qid)}" data-title="${escHtml(r.title)}">↑ ${escHtml(msg('detail-upload-photo'))}</button>
                <button class="btn btn--secondary btn--sm link-foto-btn" data-qid="${escHtml(qid)}" data-title="${escHtml(r.title)}">↗ ${escHtml(msg('detail-link-photo'))}</button>
              </div>`
-          : `<a href="/oauth/login" class="btn btn--secondary btn--sm">${escHtml(msg('detail-login-to-upload'))}</a>`}
+          : `<a href="${loginUrl()}" class="btn btn--secondary btn--sm">${escHtml(msg('detail-login-to-upload'))}</a>`}
        </div>`;
 
   const kategoriNama  = State.params?.klasterLabel || '';
   const isRawQid      = /^Q\d+$/.test(r.title);
   const createWikiUrl = `${WIKI_BASE}/w/index.php?title=${encodeURIComponent(r.title)}&action=edit`;
+  const sub = [r.lokLabel || r.provLabel, r.yearStr].filter(Boolean).join(' · ');
 
-  const wikiLink = r.articleTitle
-    ? `<p class="detail-wiki-link">
-         <a href="${WIKI_BASE}/wiki/${encodeURIComponent(r.articleTitle)}"
-            target="_blank" rel="noopener">
-           <img src="/static/img/wikipedia_tiny_logo.png" alt="" width="18" height="18">
-           <span>${escHtml(msg('detail-read-wikipedia'))}</span>
-         </a>
-       </p>`
+  // Catatan bila belum ada artikel Wikipedia / belum ada label
+  const articleNote = r.articleTitle ? ''
     : isRawQid
-    ? `<p class="detail-no-article">
+    ? `<p class="detail-callout">
          ${escHtml(msg('detail-no-label'))}
-         <a href="https://www.wikidata.org/wiki/${escHtml(r.id)}" target="_blank" rel="noopener" class="detail-no-article-link">${escHtml(msg('detail-complete-wikidata'))} →</a>
+         <a href="https://www.wikidata.org/wiki/${escHtml(r.id)}" target="_blank" rel="noopener">${escHtml(msg('detail-complete-wikidata'))} →</a>
        </p>`
-    : `<p class="detail-no-article">
+    : r.articleTitle === null
+    ? `<p class="detail-callout">
          ${msgHtml('detail-no-article', { html: `<em>${escHtml(kategoriNama || msg('detail-article'))}</em>` })}
-         <a href="${createWikiUrl}" target="_blank" rel="noopener" class="detail-no-article-link">${escHtml(msg('detail-add-article'))}</a>
-       </p>`;
+         <a href="${createWikiUrl}" target="_blank" rel="noopener">${escHtml(msg('detail-add-article'))}</a>
+       </p>`
+    : '';
+
+  const linkChip = (href, icon, label) =>
+    `<a href="${href}" target="_blank" rel="noopener" class="link-chip">
+       <img src="/static/img/${icon}" alt="" width="16" height="16"><span>${escHtml(label)}</span>${ICON_EXT}
+     </a>`;
+  const links = [
+    r.articleTitle && linkChip(`${WIKI_BASE}/wiki/${encodeURIComponent(r.articleTitle)}`, 'wikipedia_tiny_logo.png', msg('detail-read-wikipedia')),
+    linkChip(`https://www.wikidata.org/wiki/${escHtml(qid)}`, 'wikidata_tiny_logo.png', msg('detail-view-wikidata')),
+    r.commonsCat && linkChip(`https://commons.wikimedia.org/wiki/Category:${encodeURIComponent(r.commonsCat)}`, 'wikicommons_tiny_logo.png', msg('detail-gallery')),
+  ].filter(Boolean).join('');
+
+  const counter = State.currentIndex >= 0 ? `${State.currentIndex + 1} / ${State.visibleIds.length}` : '';
 
   el.innerHTML = `
     <div class="detail-panel">
 
-      <div class="detail-back-bar">
-        <button class="detail-back-btn" id="btn-kembali-detail">← ${escHtml(msg('detail-back'))}</button>
-        <span class="detail-back-counter">${State.currentIndex >= 0 ? `${State.currentIndex + 1} / ${State.visibleIds.length}` : ''}</span>
+      <div class="detail-nav">
+        <button class="back-link" id="btn-kembali-detail">← ${escHtml(msg('detail-back'))}</button>
+        ${counter ? `<div class="detail-pager">
+          <button class="icon-btn" id="btn-prev" type="button" aria-label="${escHtml(msg('panel-previous'))}" title="${escHtml(msg('panel-previous'))}">‹</button>
+          <span class="detail-back-counter">${counter}</span>
+          <button class="icon-btn" id="btn-next" type="button" aria-label="${escHtml(msg('panel-next'))}" title="${escHtml(msg('panel-next'))}">›</button>
+        </div>` : ''}
       </div>
-
-      <a href="https://www.wikidata.org/wiki/${escHtml(qid)}"
-         target="_blank" rel="noopener" class="detail-title-link">
-        <h2 class="detail-title${isRawQid ? ' detail-title--unlabeled' : ''}">
-          ${isRawQid ? `<span class="detail-title-qid">${escHtml(r.id)}</span><span class="detail-title-nolabel"> — ${escHtml(msg('detail-unlabeled'))}</span>` : escHtml(r.title)}
-          <svg class="detail-title-exticon" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M19 19H5V5h7V3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7h-2v7zM14 3v2h3.59l-9.83 9.83 1.41 1.41L19 6.41V10h2V3h-7z"/></svg>
-        </h2>
-      </a>
-      <hr class="detail-hr">
-
-      <div class="detail-lead">
-        <div class="detail-lead-text">
-          <div id="detail-excerpt-${escHtml(qid)}" class="detail-excerpt">
-            ${(r.articleTitle || r.articleTitle === undefined) ? `<p class="detail-excerpt-loading">${escHtml(msg('detail-loading-excerpt'))}</p>` : ''}
-          </div>
-
-          ${wikiLink}
-        </div>
-        <div class="detail-lead-media">
-          ${imgFigure}
-        </div>
-      </div>
-
-      <hr class="detail-hr">
 
       ${kategoriNama ? `<p class="detail-kategori">${escHtml(kategoriNama)}</p>` : ''}
+      <h2 class="detail-title${isRawQid ? ' detail-title--unlabeled' : ''}">
+        ${isRawQid ? `<span class="detail-title-qid">${escHtml(r.id)}</span><span class="detail-title-nolabel"> — ${escHtml(msg('detail-unlabeled'))}</span>` : escHtml(r.title)}
+      </h2>
+      ${sub ? `<p class="detail-subtitle">${escHtml(sub)}</p>` : ''}
 
-      <div id="detail-dynprops-${escHtml(qid)}">
-        <p class="detail-excerpt-loading">${escHtml(msg('detail-loading'))}</p>
+      <div class="detail-media">${imgFigure}</div>
+
+      <div id="detail-excerpt-${escHtml(qid)}" class="detail-excerpt">
+        ${(r.articleTitle || r.articleTitle === undefined) ? `<p class="detail-excerpt-loading">${escHtml(msg('detail-loading-excerpt'))}</p>` : ''}
       </div>
+      ${articleNote}
 
-      <p class="detail-wikidata-link">
-        <a href="https://www.wikidata.org/wiki/${escHtml(qid)}" target="_blank" rel="noopener">
-          <img src="/static/img/wikidata_tiny_logo.png" alt="" width="18" height="18">
-          <span>${escHtml(msg('detail-view-wikidata'))}</span>
-        </a>
-      </p>
+      <div class="detail-links">${links}</div>
 
-      ${r.commonsCat ? `<hr class="detail-hr">
-      <div class="detail-galeri-section">
-        <p class="detail-galeri-heading">${escHtml(msg('detail-gallery'))}</p>
-        <p class="detail-galeri-link">
-          <a href="https://commons.wikimedia.org/wiki/Category:${encodeURIComponent(r.commonsCat)}"
-             target="_blank" rel="noopener">
-            <img src="/static/img/wikicommons_tiny_logo.png" alt="" width="18" height="18">
-            <span>${escHtml(msg('detail-view-commons'))}</span>
-          </a>
-        </p>
-      </div>` : ''}
+      <section class="detail-section">
+        <div class="detail-section-head">
+          <h3>${escHtml(msg('detail-data-title'))}</h3>
+        </div>
+        <div id="detail-dynprops-${escHtml(qid)}">
+          <p class="detail-excerpt-loading">${escHtml(msg('detail-loading'))}</p>
+        </div>
+      </section>
+
+      <div id="detail-enrich-${escHtml(qid)}"></div>
 
     </div>`;
 
-  el.querySelector('#btn-kembali-detail')
-    ?.addEventListener('click', () => { mapShowShape(null); showSection('hasil'); });
+  const backToResults = () => { mapShowShape(null); showSection('hasil'); };
+  el.querySelector('#btn-kembali-detail')?.addEventListener('click', backToResults);
+  el.querySelector('#btn-prev')?.addEventListener('click', () => {
+    if (State.currentIndex > 0) openDetail(State.currentIndex - 1);
+  });
+  el.querySelector('#btn-next')?.addEventListener('click', () => {
+    if (State.currentIndex < State.visibleIds.length - 1) openDetail(State.currentIndex + 1);
+  });
 
   el.querySelector('.js-lightbox-trigger')
     ?.addEventListener('click', () => openLightbox(r.imageFilename));
@@ -878,7 +968,7 @@ const INPUT_PLACEHOLDER = {
 function renderDynPropsHtml(qid, detail, klasterNama = '') {
   const r    = State.records[qid];
   const row  = (key, valHtml) =>
-    `<li><span class="detail-info-key">${escHtml(key)}:</span> ${valHtml}</li>`;
+    `<li class="detail-data-row"><span class="detail-info-key">${escHtml(key)}</span><span class="detail-info-val">${valHtml}</span></li>`;
   const items = [];
 
   if (r?.provLabel) items.push(row(msg('region-label'), escHtml(r.provLabel)));
@@ -887,7 +977,8 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
     items.push(row(msg('detail-type'), escHtml(tipe)));
   }
 
-  skemaKategori(klasterNama).forEach(attr => {
+  const skema = skemaKategori(klasterNama);
+  skema.forEach(attr => {
     const v = detail.values[attr.pid];
     if (!v) { items.push(renderEmptyPropRow(attr)); return; }
     const val = v.url && /^https?:\/\//i.test(v.url)
@@ -896,10 +987,39 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
     items.push(row(attr.label, val));
   });
 
-  let html = `<ul class="detail-info-list detail-info-list--dyn">${items.join('')}</ul>`;
+  // Properti tambahan pengguna untuk butir ini (di luar skema kategori)
+  (detail.extra || []).forEach(attr => {
+    const v = detail.values[attr.pid];
+    items.push(v ? row(attr.label, v.url ? `<a href="${escHtml(v.url)}" target="_blank" rel="noopener" class="break-all">${escHtml(v.text)}</a>` : escHtml(v.text))
+                 : renderEmptyPropRow(attr));
+  });
+
+  let html = `<ul class="detail-data">${items.join('')}</ul>`;
+
+  if (APP_USER) {
+    html += `<div class="add-prop">
+      <button type="button" class="link-btn js-add-prop-open">+ ${escHtml(msg('detail-add-property'))}</button>
+      <div class="add-prop-box hidden">
+        <div class="prop-edit-field add-prop-field">
+          <input type="text" class="form-input form-input--sm js-add-prop-input" autocomplete="off" spellcheck="false"
+                 placeholder="${escHtml(msg('detail-add-property-placeholder'))}" aria-label="${escHtml(msg('detail-add-property'))}">
+          <ul class="prop-suggest add-prop-list hidden" role="listbox"></ul>
+        </div>
+        <button type="button" class="prop-cancel-btn js-add-prop-close" aria-label="${escHtml(msg('button-cancel'))}" title="${escHtml(msg('button-cancel'))}">✕</button>
+      </div>
+    </div>`;
+  }
+
+  const nAll = Object.keys(detail.claims || {}).length;
+  if (nAll) {
+    html += `<details class="detail-all">
+      <summary>${escHtml(msg('detail-all-data', nAll))}</summary>
+      <div class="detail-all-body"><p class="detail-excerpt-loading">${escHtml(msg('loading'))}</p></div>
+    </details>`;
+  }
 
   if (detail.wikibooks) {
-    html += `<p class="detail-wiki-link"><a href="${escHtml(detail.wikibooks)}" target="_blank" rel="noopener"><img src="/static/img/wikibook_tiny_logo.png" alt="" width="18" height="18"><span>${escHtml(msg('detail-view-wikibooks'))}</span></a></p>`;
+    html += `<div class="detail-links"><a href="${escHtml(detail.wikibooks)}" target="_blank" rel="noopener" class="link-chip"><img src="/static/img/wikibook_tiny_logo.png" alt="" width="16" height="16"><span>${escHtml(msg('detail-view-wikibooks'))}</span>${ICON_EXT}</a></div>`;
   }
 
   return html;
@@ -908,21 +1028,35 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
 function renderEmptyPropRow(attr) {
   const inputType = { quantity: 'number', url: 'url' }[attr.type] || 'text';
   const extraAttr = attr.type === 'quantity' ? ' step="any"' : '';
-  const unitText  = attr.type === 'quantity' ? (attr.unitLabel || attr.suffix || '') : '';
-  return `<li class="detail-prop-empty-row" data-pid="${escHtml(attr.pid)}">
-    <span class="detail-info-key">${escHtml(attr.label)}:</span>
-    <span class="prop-empty-badge">–</span>
-    <button class="js-prop-pencil prop-pencil-btn" title="${escHtml(msg('prop-add'))}" aria-label="${escHtml(msg('prop-add'))}" type="button">+</button>
-    <span class="prop-edit-inline hidden">
-      <span class="prop-edit-field">
-        <input type="${inputType}" class="prop-edit-input${attr.type === 'item' ? ' prop-edit-input--item' : ''}"
-               placeholder="${escHtml(INPUT_PLACEHOLDER[attr.type] || '')}" autocomplete="off"${extraAttr}>
-        ${attr.type === 'item' ? '<ul class="prop-suggest hidden" role="listbox"></ul>' : ''}
+  const unitText  = attr.type === 'quantity' && !attr.units?.length ? (attr.unitLabel || attr.suffix || '') : '';
+  // Properti tambahan bertipe angka: satuan dipilih dari satuan yang diizinkan properti itu
+  const unitSelect = attr.units?.length
+    ? `<select class="form-select form-select--sm prop-unit-select" aria-label="${escHtml(msg('detail-unit'))}">
+        ${attr.units.map(u => `<option value="${escHtml(u.id)}">${escHtml(u.label)}</option>`).join('')}
+      </select>` : '';
+  return `<li class="detail-data-row detail-prop-empty-row" data-pid="${escHtml(attr.pid)}">
+    <span class="detail-info-key">${escHtml(attr.label)}</span>
+    <span class="detail-info-val">
+      <span class="prop-empty-badge">${escHtml(msg('detail-empty-value'))}</span>
+      ${APP_USER ? `<span class="prop-actions">
+        <button class="js-prop-pencil prop-add-btn" type="button" title="${escHtml(msg('prop-add'))}">${escHtml(msg('detail-add-manual'))}</button>
+        <button class="js-prop-ai prop-add-btn prop-add-btn--ai" type="button" title="${escHtml(msg('detail-ai-title'))}">✨ AI</button>
+      </span>`
+      // Tamu: tombol Isi tetap terlihat, tetapi mengarah ke halaman masuk; tanpa tombol AI
+      : `<a href="${loginUrl()}" class="prop-add-btn" title="${escHtml(msg('detail-login-to-fill'))}">${escHtml(msg('detail-add-manual'))}</a>`}
+      <span class="prop-edit-inline hidden">
+        <span class="prop-edit-field">
+          <input type="${inputType}" class="form-input prop-edit-input${attr.type === 'item' ? ' prop-edit-input--item' : ''}"
+                 placeholder="${escHtml(INPUT_PLACEHOLDER[attr.type] || '')}" autocomplete="off"${extraAttr}
+                 aria-label="${escHtml(attr.label)}">
+          ${attr.type === 'item' ? '<ul class="prop-suggest hidden" role="listbox"></ul>' : ''}
+        </span>
+        ${unitText ? `<span class="prop-edit-unit">${escHtml(unitText)}</span>` : ''}${unitSelect}
+        <button class="prop-save-btn" type="button" title="${escHtml(msg('button-save'))}" aria-label="${escHtml(msg('button-save'))}">✓</button>
+        <button class="prop-cancel-btn" type="button" title="${escHtml(msg('button-cancel'))}" aria-label="${escHtml(msg('button-cancel'))}">✕</button>
       </span>
-      ${unitText ? `<span class="prop-edit-unit">${escHtml(unitText)}</span>` : ''}
-      <button class="prop-save-btn" type="button" title="${escHtml(msg('button-save'))}">✓</button>
-      <button class="prop-cancel-btn" type="button" title="${escHtml(msg('button-cancel'))}">✕</button>
     </span>
+    <div class="ai-slot hidden" aria-live="polite"></div>
   </li>`;
 }
 
@@ -948,6 +1082,156 @@ function renderDetailProps(qid) {
   if (!el || !r?._detail) return;
   el.innerHTML = renderDynPropsHtml(qid, r._detail, State.params?.klasterNama || '');
   attachPropEditHandlers(qid, el);
+  attachAddProperty(qid, el);
+  el.querySelector('.detail-all')?.addEventListener('toggle', e => renderAllData(qid, e.currentTarget), { once: true });
+  renderDetailEnrichLink(qid);
+}
+
+/** Atribut yang tampil di panel detail: skema kategori + properti tambahan butir ini. */
+function detailAttrs(qid) {
+  return skemaKategori(State.params?.klasterNama || '').concat(State.records[qid]?._detail?.extra || []);
+}
+
+/** Satuan pilihan pengguna (dropdown satuan properti tambahan) → atribut. */
+function applyUnitChoice(attr, li) {
+  const sel = li?.querySelector('.prop-unit-select');
+  if (!sel || !attr.units) return;
+  const u = attr.units.find(x => x.id === sel.value);
+  if (u) { attr.unit = u.id; attr.unitLabel = u.label; }
+}
+
+// ---------------------------------------------------------------------------
+// TAMBAH DATA LAIN — properti Wikidata di luar skema kategori, hanya untuk butir ini
+// ---------------------------------------------------------------------------
+/** Label properti Wikidata ditulis huruf kecil; samakan dengan label skema. */
+const ucFirst = t => t ? t.charAt(0).toLocaleUpperCase(I18N.lang) + t.slice(1) : t;
+
+// meter, meter persegi, kilometer, kilogram, hektare, kilometer persegi, detik
+const PREFERRED_UNITS = ['Q11573', 'Q25343', 'Q828224', 'Q11570', 'Q35852', 'Q712226', 'Q11574'];
+
+function attachAddProperty(qid, container) {
+  const wrap = container.querySelector('.add-prop');
+  if (!wrap) return;
+  const box   = wrap.querySelector('.add-prop-box');
+  const open  = wrap.querySelector('.js-add-prop-open');
+  const input = wrap.querySelector('.js-add-prop-input');
+  const list  = wrap.querySelector('.add-prop-list');
+  const r = State.records[qid];
+  let results = [], timer = null, ctrl = null, suggested = null;
+
+  // Properti yang sudah ada di butir atau sudah tampil di panel tidak ditawarkan lagi
+  const taken = () => new Set([...Object.keys(r._detail.claims || {}), ...detailAttrs(qid).map(a => a.pid)]);
+
+  const render = (items, heading) => {
+    // Properti yang belum bisa disunting di sini ditaruh paling bawah
+    const avail = items.filter(p => !taken().has(p.id)).sort((a, b) => !a.type - !b.type);
+    results = avail;
+    list.innerHTML = (heading && avail.length ? `<li class="combo-group" role="presentation">${escHtml(heading)}</li>` : '')
+      + (avail.length ? avail.map((p, i) => `
+        <li class="prop-suggest-item${p.type ? '' : ' prop-suggest-item--disabled'}" role="option" data-index="${i}"
+            aria-disabled="${!p.type}">
+          <span class="prop-suggest-label">${escHtml(p.label)}</span>
+          <span class="prop-suggest-qid">${escHtml(p.id)}</span>
+          ${p.type ? '' : `<span class="prop-suggest-qid">· ${escHtml(msg('detail-add-property-unsupported'))}</span>`}
+          ${p.description ? `<span class="prop-suggest-desc">${escHtml(p.description)}</span>` : ''}
+        </li>`).join('')
+      : `<li class="prop-suggest-empty">${escHtml(msg('detail-add-property-none'))}</li>`);
+    list.classList.remove('hidden');
+  };
+
+  const showSuggested = async () => {
+    list.innerHTML = `<li class="prop-suggest-empty">${escHtml(msg('loading'))}</li>`;
+    list.classList.remove('hidden');
+    try { suggested ??= await suggestProperties(qid); } catch { suggested = []; }
+    if (!input.value.trim()) render(suggested, msg('detail-add-property-suggested'));
+  };
+
+  const close = () => {
+    box.classList.add('hidden');
+    open.classList.remove('hidden');
+    list.classList.add('hidden');
+    input.value = '';
+  };
+
+  open.addEventListener('click', () => {
+    open.classList.add('hidden');
+    box.classList.remove('hidden');
+    input.focus();
+    showSuggested();
+  });
+  wrap.querySelector('.js-add-prop-close').addEventListener('click', close);
+  input.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const term = input.value.trim();
+    if (term.length < 2) { if (!term) showSuggested(); return; }
+    timer = setTimeout(async () => {
+      ctrl?.abort();
+      ctrl = new AbortController();
+      try { render(await searchProperties(term, ctrl.signal)); } catch (err) { if (err.name !== 'AbortError') list.classList.add('hidden'); }
+    }, 250);
+  });
+
+  // mousedown agar input tidak kehilangan fokus sebelum pilihan tercatat
+  list.addEventListener('mousedown', async e => {
+    const li = e.target.closest('.prop-suggest-item');
+    if (!li) return;
+    e.preventDefault();
+    const p = results[+li.dataset.index];
+    if (!p?.type) return;
+    const attr = { pid: p.id, label: ucFirst(p.label), type: p.type, unit: '', unitLabel: '', extra: true };
+    if (p.type === 'quantity') {
+      list.innerHTML = `<li class="prop-suggest-empty">${escHtml(msg('loading'))}</li>`;
+      try { attr.units = await fetchPropertyUnits(p.id); } catch { attr.units = []; }
+      // Satuan bawaan: satuan SI yang umum bila diizinkan, selain itu satuan pertama
+      const u = attr.units.find(x => PREFERRED_UNITS.includes(x.id)) || attr.units[0];
+      if (u) {
+        attr.units = [u, ...attr.units.filter(x => x !== u)];
+        attr.unit = u.id;
+        attr.unitLabel = u.label;
+      }
+    }
+    (r._detail.extra ||= []).push(attr);
+    renderDetailProps(qid);
+    // Langsung buka isian properti baru
+    $(`detail-dynprops-${qid}`)?.querySelector(`.detail-prop-empty-row[data-pid="${CSS.escape(p.id)}"] .js-prop-pencil`)?.click();
+  });
+  input.addEventListener('blur', () => setTimeout(() => list.classList.add('hidden'), 150));
+  input.addEventListener('focus', () => { if (!input.value.trim()) showSuggested(); });
+}
+
+/** "Lihat semua data": semua properti butir, dimuat saat pertama dibuka. */
+async function renderAllData(qid, details) {
+  const body = details.querySelector('.detail-all-body');
+  try {
+    const rows = await fetchAllClaimsView(State.records[qid]._detail.claims, State.abortCtrl?.signal);
+    const MAX = 5;
+    body.innerHTML = `<ul class="detail-data detail-data--all">${rows.map(row => {
+      const vals = row.values.slice(0, MAX).map(v => v.url
+        ? `<a href="${escHtml(v.url)}" target="_blank" rel="noopener" class="break-all">${escHtml(v.text)}</a>`
+        : escHtml(v.text)).join(', ');
+      const more = row.values.length > MAX ? ` <span class="prop-empty-badge">${escHtml(msg('detail-more-values', row.values.length - MAX))}</span>` : '';
+      return `<li class="detail-data-row">
+        <a class="detail-info-key" href="https://www.wikidata.org/wiki/Property:${escHtml(row.pid)}" target="_blank" rel="noopener">${escHtml(ucFirst(row.label))}</a>
+        <span class="detail-info-val">${vals}${more}</span>
+      </li>`;
+    }).join('')}</ul>`;
+  } catch (err) {
+    if (err.name !== 'AbortError') body.innerHTML = `<p class="detail-excerpt-loading">${escHtml(msg('detail-load-failed'))}</p>`;
+  }
+}
+
+/** Masih ada yang kosong: tautan untuk mengerjakan banyak butir sekaligus di Perkaya Data. */
+function renderDetailEnrichLink(qid) {
+  const more = $(`detail-enrich-${qid}`);
+  if (!more) return;
+  const r = State.records[qid];
+  const missing = skemaKategori(State.params?.klasterNama || '').some(a => !r._detail.values[a.pid]);
+  const ctx = State.params && searchContext(State.params);
+  more.innerHTML = APP_USER && missing && ctx && ctx.region !== 'area'
+    ? `<a href="${escHtml(contextUrl('/enrich', ctx))}" class="detail-more-link">${escHtml(msg('detail-ai-open-enrich'))}</a>`
+    : '';
 }
 
 /** Nilai tampilan untuk atribut yang baru disimpan (tanpa perlu memuat ulang). */
@@ -969,13 +1253,11 @@ function formatNilaiBaru(attr, value, itemLabel) {
 }
 
 function attachPropEditHandlers(qid, container) {
-  const attrByPid = Object.fromEntries(
-    skemaKategori(State.params?.klasterNama || '').map(a => [a.pid, a])
-  );
+  const attrByPid = Object.fromEntries(detailAttrs(qid).map(a => [a.pid, a]));
 
   const closeEdit = li => {
     li.querySelector('.prop-empty-badge').classList.remove('hidden');
-    li.querySelector('.js-prop-pencil').classList.remove('hidden');
+    li.querySelector('.prop-actions').classList.remove('hidden');
     li.querySelector('.prop-edit-inline').classList.add('hidden');
     li.querySelector('.prop-suggest')?.classList.add('hidden');
     const input = li.querySelector('.prop-edit-input');
@@ -1004,6 +1286,7 @@ function attachPropEditHandlers(qid, container) {
       return;
     }
 
+    applyUnitChoice(attr, li);
     btn.disabled    = true;
     btn.textContent = '…';
 
@@ -1034,12 +1317,22 @@ function attachPropEditHandlers(qid, container) {
     }
   };
 
+  // Tanpa login tidak ada tombol tambah — baris kosong cukup ditampilkan
+  if (!APP_USER) return;
+
+  // Tombol ✨ AI per atribut, dan kandidat AI yang sudah ada (mis. dari Perkaya Data) langsung ditampilkan
+  container.querySelectorAll('.detail-prop-empty-row').forEach(li => {
+    li.querySelector('.js-prop-ai').addEventListener('click', () => aiSearchRow(qid, li));
+  });
+  aiShowExisting(qid, container);
+
   container.querySelectorAll('.detail-prop-empty-row').forEach(li => {
     const input = li.querySelector('.prop-edit-input');
 
     li.querySelector('.js-prop-pencil').addEventListener('click', () => {
       li.querySelector('.prop-empty-badge').classList.add('hidden');
-      li.querySelector('.js-prop-pencil').classList.add('hidden');
+      li.querySelector('.prop-actions').classList.add('hidden');
+      li.querySelector('.ai-slot').classList.add('hidden');
       li.querySelector('.prop-edit-inline').classList.remove('hidden');
       input.focus();
     });
@@ -1053,6 +1346,186 @@ function attachPropEditHandlers(qid, container) {
     const suggest = li.querySelector('.prop-suggest');
     if (suggest) attachItemSuggest(input, suggest);
   });
+}
+
+// ---------------------------------------------------------------------------
+// ✨ AI DI PANEL DETAIL — cari satu atribut kosong, periksa sumbernya, lalu simpan.
+// Memakai endpoint & antrean yang sama dengan Perkaya Data (ai.js): kandidat yang
+// belum diputuskan di sini tetap muncul di langkah Validasi Perkaya Data.
+// ---------------------------------------------------------------------------
+let _aiOpen = null;  // kandidat terbuka milik pengguna (dimuat sekali, lalu diperbarui lokal)
+
+async function aiOpenList() {
+  if (_aiOpen === null) {
+    try { _aiOpen = await aiOpenCandidates(); } catch { _aiOpen = []; }
+  }
+  return _aiOpen;
+}
+
+/** Tampilkan kandidat menunggu validasi yang sudah ada untuk atribut-atribut kosong butir ini. */
+async function aiShowExisting(qid, container) {
+  const open = await aiOpenList();
+  container.querySelectorAll('.detail-prop-empty-row').forEach(li => {
+    const cands = sortCandidates(open.filter(c => c.qid === qid && c.pid === li.dataset.pid && c.status === 'pending'));
+    if (cands.length && li.isConnected) aiRenderCandidates(qid, li, cands);
+  });
+}
+
+function aiAttr(qid, li) {
+  const attr = detailAttrs(qid).find(a => a.pid === li.dataset.pid);
+  if (attr) applyUnitChoice(attr, li);
+  return attr;
+}
+
+function aiSetSlot(li, html) {
+  const slot = li.querySelector('.ai-slot');
+  slot.innerHTML = html;
+  slot.classList.toggle('hidden', !html);
+  return slot;
+}
+
+/** Cari nilai satu atribut dengan AI lalu tampilkan kandidatnya di bawah baris itu. */
+async function aiSearchRow(qid, li) {
+  const attr = aiAttr(qid, li);
+  const r = State.records[qid];
+  if (!attr || !r) return true;
+  if (!aiReady()) {
+    openSettings(() => aiSearchRow(qid, li));  // isi API key dulu, lalu langsung mencari
+    return false;
+  }
+  const btn = li.querySelector('.js-prop-ai');
+  btn.disabled = true;
+  aiSetSlot(li, `<p class="ai-status"><span class="loader loader--small"></span>${escHtml(msg('detail-ai-searching'))}</p>`);
+
+  try {
+    const { ok, status, data } = await aiSearch({
+      qid, label: r.title, description: r._detail?.description || '',
+      kategori: State.params?.klasterNama || '',
+      lokasi: [r.lokLabel, r.provLabel].filter((v, i, a) => v && a.indexOf(v) === i).join(', '),
+    }, attr);
+    if (!li.isConnected) return true;
+    btn.disabled = false;
+    if (!ok) {
+      aiSetSlot(li, `<p class="ai-status ai-status--error">${escHtml(data.error || msg('pk-failed-http', status))}</p>`);
+      return !(status === 401 || data.fatal);
+    }
+    // Simpan ke daftar lokal agar konsisten bila detail dibuka ulang
+    if (_aiOpen) _aiOpen = _aiOpen.filter(c => !(c.qid === qid && c.pid === attr.pid)).concat(data);
+    if (data[0]?.status !== 'pending') {
+      aiSetSlot(li, `<p class="ai-status">${escHtml(msg('detail-ai-not-found'))}${data[0]?.note ? ` <span class="ai-note">${escHtml(data[0].note)}</span>` : ''}</p>`);
+      return true;
+    }
+    aiRenderCandidates(qid, li, sortCandidates(data));
+  } catch (err) {
+    btn.disabled = false;
+    aiSetSlot(li, `<p class="ai-status ai-status--error">${escHtml(msg('error-generic', err.message))}</p>`);
+  }
+  return true;
+}
+
+function aiCandidateHtml(c, multi) {
+  const src = (c.sources || [])[0] || {};
+  const v = VERIF_VIEW_DETAIL[src.verification || c.verification] || VERIF_VIEW_DETAIL.gagal_dibuka;
+  let host = '';
+  try { host = new URL(src.url).hostname.replace(/^www\./, ''); } catch {}
+  const value = `${c.value}${c.unit_label ? ' ' + c.unit_label : ''}`;
+  return `<div class="ai-cand" data-id="${c.id}">
+    <div class="ai-cand-head">
+      <strong class="ai-cand-value">${escHtml(value)}</strong>
+      <span class="pk-source-verif pk-source-verif--${v.cls}" title="${escHtml(src.verify_note || '')}">${escHtml(v.label)}</span>
+    </div>
+    ${src.url ? `<a class="ai-cand-src" href="${escHtml(src.url)}" target="_blank" rel="noopener">${escHtml(src.title || host)} ↗</a>` : ''}
+    ${src.quote ? `<blockquote class="ai-cand-quote">${escHtml(src.quote)}</blockquote>` : ''}
+    ${c.datatype === 'item' ? `<div class="ai-item-choices"><span class="loader loader--small"></span></div>` : ''}
+    <div class="ai-cand-actions">
+      <button type="button" class="btn btn--primary btn--sm js-ai-approve"${c.datatype === 'item' ? ' disabled' : ''}>✓ ${escHtml(msg('detail-ai-save'))}</button>
+      ${multi ? '' : `<button type="button" class="btn btn--secondary btn--sm js-ai-reject">${escHtml(msg('pk-reject'))}</button>`}
+    </div>
+  </div>`;
+}
+
+const VERIF_VIEW_DETAIL = {
+  terverifikasi:       { cls: 'ok',    label: msg('pk-verif-ok') },
+  nilai_tidak_cocok:   { cls: 'warn',  label: msg('pk-verif-value-mismatch') },
+  nilai_di_halaman:    { cls: 'warn',  label: msg('pk-verif-value-on-page') },
+  tidak_terverifikasi: { cls: 'bad',   label: msg('pk-verif-unverified') },
+  gagal_dibuka:        { cls: 'muted', label: msg('pk-verif-unchecked') },
+};
+
+/** Kandidat AI di bawah baris atribut: Simpan langsung ke Wikidata, atau Tolak. */
+function aiRenderCandidates(qid, li, cands) {
+  const attr = aiAttr(qid, li);
+  const multi = cands.length > 1;
+  const slot = aiSetSlot(li, `
+    ${multi ? `<p class="ai-status ai-status--warn">${escHtml(msg('pk-disagree-title', cands.length))}</p>` : ''}
+    ${cands.map(c => aiCandidateHtml(c, multi)).join('')}
+    ${multi ? `<div class="ai-cand-actions"><button type="button" class="btn btn--secondary btn--sm js-ai-reject">${escHtml(msg('pk-reject-all'))}</button></div>` : ''}
+    <p class="ai-msg hidden"></p>`);
+  const setMsg = (cls, text) => {
+    const el = slot.querySelector('.ai-msg');
+    el.className = `ai-msg ai-status ai-status--${cls}`;
+    el.textContent = text;
+  };
+  const busy = on => slot.querySelectorAll('button').forEach(b => { b.disabled = on || b.dataset.locked === '1'; });
+
+  // Atribut bertipe butir: AI memberi nama, pengguna memilih butir Wikidata yang tepat
+  cands.filter(c => c.datatype === 'item').forEach(async c => {
+    const box = slot.querySelector(`.ai-cand[data-id="${c.id}"] .ai-item-choices`);
+    let results = [];
+    try { results = await searchWikidataItems(c.value); } catch {}
+    if (!box.isConnected) return;
+    box.innerHTML = results.length
+      ? `<span class="ai-item-label">${escHtml(msg('detail-ai-choose-item'))}</span>` + results.slice(0, 3).map((it, i) => `
+          <label class="ai-item-choice">
+            <input type="radio" name="ai-item-${c.id}" value="${escHtml(it.id)}" data-label="${escHtml(it.label)}"${i === 0 ? ' checked' : ''}>
+            <span><strong>${escHtml(it.label)}</strong> <span class="pk-choice-qid">${escHtml(it.id)}</span>
+            ${it.description ? `<span class="pk-choice-desc">${escHtml(it.description)}</span>` : ''}</span>
+          </label>`).join('')
+      : `<span class="ai-item-label">${escHtml(msg('pk-item-none'))}</span>`;
+    const approve = box.closest('.ai-cand').querySelector('.js-ai-approve');
+    approve.disabled = !results.length;
+    approve.dataset.locked = results.length ? '' : '1';
+  });
+
+  slot.querySelectorAll('.js-ai-approve').forEach(btn => btn.addEventListener('click', async () => {
+    const c = cands.find(x => String(x.id) === btn.closest('.ai-cand').dataset.id);
+    const picked = slot.querySelector(`input[name="ai-item-${c.id}"]:checked`);
+    const body = c.datatype === 'item'
+      ? { value_qid: picked?.value || '', value_label: picked?.dataset.label || '' }
+      : { value: c.value };
+    body.source_index = 0;
+    busy(true);
+    setMsg('info', msg('pk-saving'));
+    try {
+      const { ok, status, data } = await aiApprove(c.id, body);
+      if (!ok) { busy(false); setMsg('error', data.error || msg('pk-failed-http', status)); return; }
+      if (data.warning) appShowDialog(escHtml(data.warning), 'alert', msg('pk-saved-with-warning'));
+      if (_aiOpen) _aiOpen = _aiOpen.filter(x => !(x.qid === qid && x.pid === c.pid));
+      const r = State.records[qid];
+      if (r?._detail && attr) {
+        r._detail.values[attr.pid] = formatNilaiBaru(attr, body.value_qid || c.value, body.value_label);
+        renderDetailProps(qid);
+      }
+    } catch (err) {
+      busy(false);
+      setMsg('error', msg('error-generic', err.message));
+    }
+  }));
+
+  slot.querySelectorAll('.js-ai-reject').forEach(btn => btn.addEventListener('click', async () => {
+    busy(true);
+    try {
+      for (const c of cands) {
+        const { ok, data } = await aiReject(c.id);
+        if (!ok) { busy(false); setMsg('error', data.error || msg('pk-cell-error')); return; }
+      }
+      if (_aiOpen) _aiOpen = _aiOpen.filter(x => !(x.qid === qid && x.pid === cands[0].pid));
+      aiSetSlot(li, '');
+    } catch (err) {
+      busy(false);
+      setMsg('error', msg('error-generic', err.message));
+    }
+  }));
 }
 
 async function loadSingleItemMedia(qid) {
@@ -1088,9 +1561,8 @@ async function loadExcerpt(qid) {
 
 function updateDetailNav() {
   const i = State.currentIndex;
-  if (DOM.btnPrev) DOM.btnPrev.style.visibility = i > 0 ? 'visible' : 'hidden';
-  if (DOM.btnNext) DOM.btnNext.style.visibility =
-    i < State.visibleIds.length - 1 ? 'visible' : 'hidden';
+  if ($('btn-prev')) $('btn-prev').disabled = i <= 0;
+  if ($('btn-next')) $('btn-next').disabled = i >= State.visibleIds.length - 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -1119,7 +1591,7 @@ function initBottomSheet() {
   const CLOSED_Y = () => panel.offsetHeight - 56; // hanya handle yang terlihat
   const OPEN_Y   = 0;
 
-  let startY = 0, startTranslate = 0, dragging = false;
+  let startY = 0, startTranslate = 0, dragging = false, moved = false;
 
   function getCurrentTranslateY() {
     const m = new DOMMatrix(getComputedStyle(panel).transform);
@@ -1133,6 +1605,7 @@ function initBottomSheet() {
 
   handle.addEventListener('pointerdown', e => {
     dragging = true;
+    moved = false;
     startY = e.clientY;
     startTranslate = getCurrentTranslateY();
     panel.classList.add('dragging');
@@ -1143,6 +1616,7 @@ function initBottomSheet() {
   handle.addEventListener('pointermove', e => {
     if (!dragging) return;
     const dy = e.clientY - startY;
+    if (Math.abs(dy) > 5) moved = true;
     const next = Math.max(OPEN_Y, Math.min(CLOSED_Y(), startTranslate + dy));
     panel.style.transform = `translateY(${next}px)`;
   });
@@ -1151,9 +1625,13 @@ function initBottomSheet() {
     if (!dragging) return;
     dragging = false;
     const current = getCurrentTranslateY();
-    // Snap: kalau sudah > 40% terbuka → buka penuh, sebaliknya tutup
-    snapTo(current < CLOSED_Y() * 0.6 ? OPEN_Y : CLOSED_Y());
+    // Ketuk tanpa menarik: buka/tutup. Tarik: kalau sudah > 40% terbuka → buka penuh, sebaliknya tutup
+    if (!moved) snapTo(current > CLOSED_Y() / 2 ? OPEN_Y : CLOSED_Y());
+    else snapTo(current < CLOSED_Y() * 0.6 ? OPEN_Y : CLOSED_Y());
   });
+
+  // Pengguna baru langsung melihat form, bukan hanya peta dengan pegangan kecil di bawah
+  if (window.matchMedia('(max-width: 800px)').matches) snapTo(OPEN_Y);
 }
 
 // ---------------------------------------------------------------------------
@@ -1248,6 +1726,12 @@ document.addEventListener('DOMContentLoaded', () => {
   initWilayahSearch();
   DOM.selectKategori?.addEventListener('change', updateQidFromKategori);
   DOM.btnJelajahi?.addEventListener('click', startSearch);
+  $('btn-ubah-pencarian')?.addEventListener('click', () => showSection('landing'));
+  $('btn-hasil-terakhir')?.addEventListener('click', () => showSection('hasil'));
+  $('hasil-pager')?.addEventListener('click', e => {
+    const btn = e.target.closest('button[data-page]');
+    if (btn && !btn.disabled) goToPage(Number(btn.dataset.page));
+  });
 
   // Cukupkan: hentikan penarikan, tampilkan data yang sudah masuk
   $('btn-cukupkan')?.addEventListener('click', e => {
@@ -1270,43 +1754,14 @@ document.addEventListener('DOMContentLoaded', () => {
   DOM.searchInput?.addEventListener('input', e => {
     State.filter.search = e.target.value; applyFilter();
   });
-  DOM.btnArtikel?.addEventListener('click', () => { State.viewMode = 'list'; State.filter.mediaOnly = 'article'; applyFilter(); });
-  DOM.btnGambar?.addEventListener('click',  () => { State.viewMode = 'grid'; State.filter.mediaOnly = 'image';   applyFilter(); });
-  DOM.btnSemua?.addEventListener('click',   () => { State.viewMode = 'list'; State.filter.mediaOnly = null;      applyFilter(); });
-
-  // Buka halaman Perkaya Data dengan wilayah & kategori pencarian saat ini
-  $('btn-enrich')?.addEventListener('click', e => {
-    const p = State.params;
-    if (!p) return;
-    e.preventDefault();
-    const region = { provinsi: 'province', all: 'all', luar_negeri: 'abroad' }[p.wilayah];
-    const q = new URLSearchParams({ category: p.klasterSlug });
-    if (region) q.set('region', region);
-    if (region === 'province') q.set('province', p.provQid.replace(/^wd:/, ''));
-    if (p.negaraQid) q.set('country', p.negaraQid.replace(/^wd:/, ''));
-    location.href = `${e.currentTarget.getAttribute('href')}?${q}`;
-  });
-
-  // Navigasi panel
-  $('nav-beranda')?.addEventListener('click', e => { e.preventDefault(); showSection('landing'); });
-  $('nav-hasil')?.addEventListener('click', e => {
-    e.preventDefault();
-    if (State.sortedIds.length) showSection('hasil');
-  });
-  $('nav-tentang')?.addEventListener('click', e => { e.preventDefault(); showSection('about'); });
-  $('nav-kembali-hasil')?.addEventListener('click', e => {
-    e.preventDefault();
-    mapShowShape(null);
-    showSection('hasil');
-  });
-
-  // Detail prev/next
-  DOM.btnPrev?.addEventListener('click', () => {
-    if (State.currentIndex > 0) openDetail(State.currentIndex - 1);
-  });
-  DOM.btnNext?.addEventListener('click', () => {
-    if (State.currentIndex < State.visibleIds.length - 1) openDetail(State.currentIndex + 1);
-  });
+  // Filter: Semua / Ada artikel (daftar) / Ada foto (galeri)
+  [DOM.btnSemua, DOM.btnArtikel, DOM.btnGambar].forEach(btn => btn?.addEventListener('click', () => {
+    const f = btn.dataset.filter;
+    State.viewMode = f === 'image' ? 'grid' : 'list';
+    State.filter.mediaOnly = f === 'all' ? null : f;
+    setFilterButton(f);
+    applyFilter();
+  }));
 
   // Lightbox
   $('lightbox-overlay')?.addEventListener('click', e => {
@@ -1323,8 +1778,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initUploadModal();
   initLinkPhotoModal();
 
-  // Landing default
+  // Landing default; tautan yang membawa pencarian langsung dijalankan
   showSection('landing');
+  if (applyQueryParams()) startSearch();
 });
 
 // ---------------------------------------------------------------------------

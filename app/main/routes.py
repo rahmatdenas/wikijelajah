@@ -6,6 +6,12 @@ from ..utils.ai_search import DEFAULT_MODELS, GROQ_SEARCH_MODELS
 from ..utils.wikidata import KATEGORI_DATA, kategori_slug, localized_wilayah
 
 
+@main.app_context_processor
+def _ai_settings_context():
+    """Model bawaan untuk modal Pengaturan AI (dipakai di peta & Perkaya Data)."""
+    return {'default_models': DEFAULT_MODELS, 'groq_search_models': GROQ_SEARCH_MODELS}
+
+
 def _wilayah():
     return localized_wilayah(get_lang(), current_app.config['WIKIMEDIA_API_BASE'],
                              current_app.config['WIKIMEDIA_USER_AGENT'])
@@ -32,8 +38,6 @@ def enrich():
         wilayah_provinsi=provinsi,
         wilayah_luar_negeri=luar_negeri,
         kategori_data=KATEGORI_DATA,
-        default_models=DEFAULT_MODELS,
-        groq_search_models=GROQ_SEARCH_MODELS,
     )
 
 
