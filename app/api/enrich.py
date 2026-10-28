@@ -9,7 +9,7 @@ from flask import current_app, jsonify, request, session
 
 from . import api
 from ..i18n import get_lang, msg
-from .routes import _get_authed_session, _get_csrf_token, _ua, login_required
+from .routes import WikimediaAuthError, _get_authed_session, _get_csrf_token, _ua, login_required
 from ..utils import ai_search
 from ..utils.datavalue import DATATYPES, DataValueError, build_value, today_time_value
 from ..utils.enrich_store import (
@@ -235,7 +235,7 @@ def enrich_approve(cand_id):
     summary = f'Menambah {pid} dari "{source[:80]}" via WikiJelajah (Enrich Data) #WikiJelajah'
 
     try:
-        csrf = _get_csrf_token(oauth, api_url)
+        csrf = _get_csrf_token(oauth, api_url)  # WikimediaAuthError → 401 "masuk lagi" (routes.py)
         created = oauth.post(api_url, data={
             'action': 'wbcreateclaim', 'entity': qid, 'snaktype': 'value',
             'property': pid, 'value': wd_value, 'token': csrf, 'format': 'json',

@@ -494,5 +494,8 @@
 	"detail-more-values": "+{{formatnum:$1}} lainnya",
 	"detail-unit": "Satuan",
 	"api-already-has-value": "$1 pada $2 sudah terisi di Wikidata. Buka ulang butirnya untuk melihat nilainya.",
-	"detail-login-to-fill": "Masuk untuk mengisi data ini"
+	"detail-login-to-fill": "Masuk untuk mengisi data ini",
+	"api-login-expired": "Sesi login Anda di Wikimedia sudah tidak berlaku ($1). Silakan masuk lagi, lalu ulangi.",
+	"toast-saved": "$1 untuk \"$2\" berhasil disimpan ke Wikidata.",
+	"toast-view-edit": "Lihat suntingan"
 }

@@ -756,6 +756,7 @@ async function approveCurrent() {
       return;
     }
     if (data.warning) appShowDialog(escHtml(data.warning), 'alert', msg('pk-saved-with-warning'));
+    toastSaved(attrLabel(c), c.item_label, data.revid);
     afterResolved(PK.currentKey, data);
   } catch (err) {
     setCardStatus('error', err.message);

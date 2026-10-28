@@ -494,5 +494,8 @@
 	"detail-more-values": "+{{formatnum:$1}} more",
 	"detail-unit": "Unit",
 	"api-already-has-value": "$1 on $2 already has a value on Wikidata. Reopen the item to see it.",
-	"detail-login-to-fill": "Log in to fill in this data"
+	"detail-login-to-fill": "Log in to fill in this data",
+	"api-login-expired": "Your Wikimedia login is no longer valid ($1). Please log in again and retry.",
+	"toast-saved": "$1 for \"$2\" was saved to Wikidata.",
+	"toast-view-edit": "View edit"
 }
