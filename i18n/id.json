@@ -497,5 +497,7 @@
 	"detail-login-to-fill": "Masuk untuk mengisi data ini",
 	"api-login-expired": "Sesi login Anda di Wikimedia sudah tidak berlaku ($1). Silakan masuk lagi, lalu ulangi.",
 	"toast-saved": "$1 untuk \"$2\" berhasil disimpan ke Wikidata.",
-	"toast-view-edit": "Lihat suntingan"
+	"toast-view-edit": "Lihat suntingan",
+	"footer-source": "Kode sumber di GitHub",
+	"footer-license": "Lisensi MIT"
 }

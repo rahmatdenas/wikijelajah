@@ -497,5 +497,7 @@
 	"detail-login-to-fill": "Log in to fill in this data",
 	"api-login-expired": "Your Wikimedia login is no longer valid ($1). Please log in again and retry.",
 	"toast-saved": "$1 for \"$2\" was saved to Wikidata.",
-	"toast-view-edit": "View edit"
+	"toast-view-edit": "View edit",
+	"footer-source": "Source code on GitHub",
+	"footer-license": "MIT License"
 }

@@ -497,5 +497,7 @@
 	"detail-login-to-fill": "Tooltip of the Fill in button for logged-out users; it links to the login page.",
 	"api-login-expired": "Error when Wikimedia rejects the user's login token (e.g. expired). $1 = error detail from the API.",
 	"toast-saved": "Confirmation after saving a value. $1 = attribute name, $2 = item name.",
-	"toast-view-edit": "Link in the save confirmation to the edit (diff) on Wikidata."
+	"toast-view-edit": "Link in the save confirmation to the edit (diff) on Wikidata.",
+	"footer-source": "Footer link to the source code repository.",
+	"footer-license": "Footer link to the software license."
 }

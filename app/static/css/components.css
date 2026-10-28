@@ -703,3 +703,18 @@ select option { color: var(--color-text); }
 
 .detail-data-row--saved { animation: savedFlash 2.5s ease; }
 @keyframes savedFlash { 0%, 40% { background: var(--color-success-bg); } 100% { background: transparent; } }
+
+/* ==========================================================================
+   KETERANGAN BAWAH (kode sumber · lisensi)
+   ========================================================================== */
+.site-footer {
+  display: flex; flex-wrap: wrap; justify-content: center; gap: 4px var(--space-2);
+  padding: var(--space-5) 0 var(--space-2);
+  font-size: var(--text-xs); color: var(--color-gray-500);
+}
+.site-footer a { color: inherit; text-decoration: none; }
+.site-footer a:hover { color: var(--color-primary); text-decoration: underline; }
+/* Di form peta: menempel di bawah panel bila isinya pendek */
+#panel-landing .site-footer { margin-top: auto; }
+/* Di Perkaya Data: beri ruang agar tidak tertutup bar aksi bawah */
+.enrich-page .site-footer { padding-bottom: 88px; }
