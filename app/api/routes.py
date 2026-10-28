@@ -32,15 +32,42 @@ def _get_session():
     return _get_authed_session()
 
 
+class WikimediaAuthError(Exception):
+    """Wikimedia menolak token login pengguna (kedaluwarsa, dicabut, atau izin kurang)."""
+
+
 def _get_csrf_token(http_session, api_url):
-    ua = _ua()
+    """Token CSRF untuk menyunting atas nama pengguna.
+
+    Bila API tidak memberi token (galat OAuth) atau hanya memberi token anonim "+\\",
+    lempar WikimediaAuthError beserta pesan asli API agar pengguna diminta masuk lagi,
+    alih-alih KeyError 'query' yang tidak jelas.
+    """
     resp = http_session.get(
         api_url,
         params={'action': 'query', 'meta': 'tokens', 'format': 'json'},
-        headers={'User-Agent': ua},
+        headers={'User-Agent': _ua()},
         timeout=10,
     )
-    return resp.json()['query']['tokens']['csrftoken']
+    try:
+        data = resp.json()
+    except ValueError:
+        data = {}
+    token = (data.get('query') or {}).get('tokens', {}).get('csrftoken')
+    if token and token != '+\\':
+        return token
+    err = data.get('error') or {}
+    detail = err.get('info') or err.get('code') or ('anonymous token' if token else f'HTTP {resp.status_code}')
+    current_app.logger.warning('Token CSRF ditolak (%s): %s', api_url, err or data or resp.status_code)
+    raise WikimediaAuthError(detail)
+
+
+@api.errorhandler(WikimediaAuthError)
+def _login_expired(e):
+    # Sesi login tidak berlaku lagi di Wikimedia: hapus agar tampilan kembali menawarkan "Masuk"
+    session.pop('oauth_token', None)
+    session.pop('user', None)
+    return jsonify({'error': msg('api-login-expired', str(e)), 'relogin': True}), 401
 
 
 def _ua():
@@ -175,6 +202,8 @@ def add_claim(qid):
 
     try:
         csrf = _get_csrf_token(http, wikidata_api)
+    except WikimediaAuthError:
+        raise
     except Exception as e:
         return jsonify({'error': msg('api-token-failed', e)}), 500
 
@@ -195,7 +224,8 @@ def add_claim(qid):
     if 'error' in result:
         return jsonify({'error': result['error'].get('info', msg('save-failed'))}), 500
 
-    return jsonify({'success': True})
+    # revid dipakai tampilan untuk tautan "Lihat suntingan" di notifikasi berhasil
+    return jsonify({'success': True, 'revid': result.get('pageinfo', {}).get('lastrevid')})
 
 
 # ---------------------------------------------------------------------------
@@ -221,6 +251,8 @@ def set_image(qid):
 
     try:
         csrf_token = _get_csrf_token(http, wikidata_api)
+    except WikimediaAuthError:
+        raise
     except Exception as e:
         return jsonify({'error': msg('api-token-failed', e)}), 500
 
@@ -283,12 +315,9 @@ def upload_photo(qid):
 
     # 1. CSRF token dari Commons
     try:
-        tok = oauth.get(
-            commons_api,
-            params={'action': 'query', 'meta': 'tokens', 'format': 'json'},
-            headers={'User-Agent': ua},
-        ).json()
-        csrf_commons = tok['query']['tokens']['csrftoken']
+        csrf_commons = _get_csrf_token(oauth, commons_api)
+    except WikimediaAuthError:
+        raise
     except Exception as e:
         return jsonify({'error': msg('api-token-failed', e)}), 500
 
@@ -338,12 +367,7 @@ def upload_photo(qid):
 
     # 4. CSRF token dari Wikidata
     try:
-        wdtok = oauth.get(
-            wikidata_api,
-            params={'action': 'query', 'meta': 'tokens', 'format': 'json'},
-            headers={'User-Agent': ua},
-        ).json()
-        csrf_wikidata = wdtok['query']['tokens']['csrftoken']
+        csrf_wikidata = _get_csrf_token(oauth, wikidata_api)
     except Exception as e:
         return jsonify({
             'success': True,

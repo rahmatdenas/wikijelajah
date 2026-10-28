@@ -1087,6 +1087,15 @@ function renderDetailProps(qid) {
   renderDetailEnrichLink(qid);
 }
 
+/** Sorot sebentar baris yang baru tersimpan agar terlihat apa yang berubah (baris dicari lewat labelnya). */
+function flashSavedRow(qid, label) {
+  $(`detail-dynprops-${qid}`)?.querySelectorAll('.detail-data-row').forEach(row => {
+    if (row.querySelector('.detail-info-key')?.textContent !== label) return;
+    row.classList.add('detail-data-row--saved');
+    setTimeout(() => row.classList.remove('detail-data-row--saved'), 2500);
+  });
+}
+
 /** Atribut yang tampil di panel detail: skema kategori + properti tambahan butir ini. */
 function detailAttrs(qid) {
   return skemaKategori(State.params?.klasterNama || '').concat(State.records[qid]?._detail?.extra || []);
@@ -1309,7 +1318,9 @@ function attachPropEditHandlers(qid, container) {
       if (r?._detail) {
         r._detail.values[attr.pid] = formatNilaiBaru(attr, value, input.dataset.label);
         renderDetailProps(qid);
+        flashSavedRow(qid, attr.label);
       }
+      toastSaved(attr.label, r?.title || qid, data.revid);
     } catch (err) {
       appShowDialog(escHtml(msg('error-generic', err.message)), 'alert', msg('dialog-error'));
       btn.disabled    = false;
@@ -1505,7 +1516,9 @@ function aiRenderCandidates(qid, li, cands) {
       if (r?._detail && attr) {
         r._detail.values[attr.pid] = formatNilaiBaru(attr, body.value_qid || c.value, body.value_label);
         renderDetailProps(qid);
+        flashSavedRow(qid, attr.label);
       }
+      toastSaved(attr?.label || c.pid, r?.title || c.item_label, data.revid);
     } catch (err) {
       busy(false);
       setMsg('error', msg('error-generic', err.message));

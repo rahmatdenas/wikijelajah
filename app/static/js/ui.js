@@ -271,6 +271,42 @@ function initTopNavMenu(toggleId, menuId) {
 }
 
 // ---------------------------------------------------------------------------
+// NOTIFIKASI SINGKAT (toast) — konfirmasi setelah menyimpan, hilang sendiri
+// ---------------------------------------------------------------------------
+/**
+ * @param {string} text  teks polos
+ * @param {{type?: 'success'|'error', link?: {href: string, label: string}}} opts
+ */
+function showToast(text, { type = 'success', link = null } = {}) {
+  let wrap = $('toast-wrap');
+  if (!wrap) {
+    wrap = document.createElement('div');
+    wrap.id = 'toast-wrap';
+    wrap.className = 'toast-wrap';
+    wrap.setAttribute('role', 'status');
+    wrap.setAttribute('aria-live', 'polite');
+    document.body.appendChild(wrap);
+  }
+  const el = document.createElement('div');
+  el.className = `toast toast--${type}`;
+  el.innerHTML = `<span class="toast-icon" aria-hidden="true">${type === 'success' ? '✓' : '!'}</span>
+    <span class="toast-text">${escHtml(text)}</span>
+    ${link ? `<a class="toast-link" href="${escHtml(link.href)}" target="_blank" rel="noopener">${escHtml(link.label)} ↗</a>` : ''}
+    <button type="button" class="toast-close" aria-label="${escHtml(msg('button-close'))}">×</button>`;
+  const remove = () => { el.classList.add('toast--out'); setTimeout(() => el.remove(), 200); };
+  el.querySelector('.toast-close').addEventListener('click', remove);
+  wrap.appendChild(el);
+  setTimeout(remove, 6000);
+}
+
+/** Konfirmasi tersimpan ke Wikidata, dengan tautan ke suntingannya bila revid diketahui. */
+function toastSaved(attrLabel, itemLabel, revid) {
+  showToast(msg('toast-saved', attrLabel, itemLabel), {
+    link: revid ? { href: `https://www.wikidata.org/w/index.php?diff=${revid}`, label: msg('toast-view-edit') } : null,
+  });
+}
+
+// ---------------------------------------------------------------------------
 // KONTEKS PENCARIAN BERSAMA — wilayah & kategori terakhir dibawa antarhalaman
 // (Jelajah ↔ Perkaya Data) lewat parameter URL yang sama:
 // ?region=province|all|abroad|area&province=Q..&country=Q..&area=Q..&category=<slug>
