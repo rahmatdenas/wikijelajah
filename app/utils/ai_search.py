@@ -326,20 +326,20 @@ def _search_groq(api_key, model, system, prompt):
         except groq.APIConnectionError:
             raise AISearchError(msg('ai-connection-failed', 'Groq')) from None
 
-        msg = resp.choices[0].message
-        if not (msg.content or '').strip():
+        reply = resp.choices[0].message  # jangan dinamai `msg`: menimpa fungsi i18n msg()
+        if not (reply.content or '').strip():
             failures.append(f"{m}: {msg('ai-groq-empty')}")
             continue
 
         citations = []
-        for tool in msg.executed_tools or []:
+        for tool in reply.executed_tools or []:
             for r in tool.browser_results or []:
                 if r.url:
                     citations.append({'url': r.url, 'title': r.title or ''})
             for r in getattr(tool.search_results, 'results', None) or []:
                 if r.url:
                     citations.append({'url': r.url, 'title': r.title or ''})
-        return msg.content, citations, m
+        return reply.content, citations, m
 
     raise AISearchError(msg('ai-groq-all-failed', '; '.join(failures)))
 
