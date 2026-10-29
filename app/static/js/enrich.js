@@ -749,7 +749,21 @@ async function approveCurrent() {
   setCardBusy(true);
   setCardStatus('info', msg('pk-saving'));
   try {
-    const { ok, status, data } = await aiApprove(c.id, body);
+    let { ok, status, data } = await aiApprove(c.id, body);
+    // Sumber belum terverifikasi / nilai diubah: server minta penegasan pengguna dulu
+    if (!ok && data.needs_confirm) {
+      // Isi dialog berada di dalam <p>, jadi pemisah baris pakai <br>, bukan <p>
+      const reasons = (data.confirm_reasons || []).map(escHtml).join('<br><br>');
+      const confirmed = await appConfirm(`${reasons}<br><br><strong>${escHtml(msg('pk-confirm-checked'))}</strong>`,
+        msg('pk-confirm-title'));
+      if (!confirmed) {
+        setCardStatus('info', '');
+        $('pk-card-status')?.classList.add('hidden');
+        setCardBusy(false);
+        return;
+      }
+      ({ ok, status, data } = await aiApprove(c.id, { ...body, confirm_unverified: true }));
+    }
     if (!ok) {
       setCardStatus('error', data.error || msg('pk-failed-http', status));
       setCardBusy(false);

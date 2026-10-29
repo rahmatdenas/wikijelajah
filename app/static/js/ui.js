@@ -58,6 +58,22 @@ function appShowDialog(html, type = 'alert', title = msg('dialog-message')) {
 
 window.appShowDialog = appShowDialog;
 
+/** Dialog konfirmasi: resolve true bila pengguna menekan OK, false bila batal/menutup. */
+function appConfirm(html, title = msg('dialog-warning')) {
+  const overlay = $('dialog-overlay');
+  if (!overlay) return Promise.resolve(confirm(title + '\n' + html.replace(/<[^>]+>/g, '')));
+  appShowDialog(html, 'confirm', title);
+  return new Promise(resolve => {
+    const ctrl = new AbortController();
+    const done = ok => { ctrl.abort(); resolve(ok); };
+    $('dialog-btn-confirm')?.addEventListener('click', () => done(true), { signal: ctrl.signal });
+    $('dialog-btn-cancel')?.addEventListener('click', () => done(false), { signal: ctrl.signal });
+    overlay.addEventListener('click', e => { if (!e.target.closest('.dialog-box')) done(false); }, { signal: ctrl.signal });
+  });
+}
+
+window.appConfirm = appConfirm;
+
 // ---------------------------------------------------------------------------
 // SELECT YANG BISA DIKETIK (combobox)
 // <select> asli tetap jadi sumber kebenaran (disembunyikan): nilai dipilih

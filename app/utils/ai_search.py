@@ -11,10 +11,16 @@ import ipaddress
 import json
 import re
 import socket
+import time
 import unicodedata
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.connection import HTTPConnection, HTTPSConnection
+from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
+from urllib3.exceptions import ConnectTimeoutError, NewConnectionError
+from urllib3.util.connection import create_connection
 
 from ..i18n import msg
 
@@ -34,6 +40,8 @@ GROQ_SEARCH_MODELS = ['openai/gpt-oss-120b', 'openai/gpt-oss-20b']
 
 FETCH_UA = 'Mozilla/5.0 (compatible; WikiJelajah/1.0; +https://www.wikidata.org/wiki/User:WikiJelajah)'
 AI_TIMEOUT = 180  # detik — pencarian web + penalaran bisa lama
+MAX_PAGE_BYTES = 5 * 1024 * 1024  # halaman sumber dibaca paling banyak 5 MB
+MAX_REDIRECTS = 5
 
 SYSTEM_PROMPT = """You are a research assistant for Wikidata editors in Indonesia.
 Your job: find the value of ONE property of ONE Wikidata item, using web search.
@@ -433,6 +441,13 @@ def _html_to_text(raw):
     return html.unescape(raw)
 
 
+def _is_public_ip(ip):
+    ip = ipaddress.ip_address(ip)
+    if ip.version == 6 and ip.ipv4_mapped:
+        ip = ip.ipv4_mapped
+    return ip.is_global and not ip.is_multicast
+
+
 def _is_public_url(url):
     """Tolak URL ke jaringan lokal/privat (server tidak boleh disuruh membuka alamat internal)."""
     parsed = urlparse(url)
@@ -440,26 +455,153 @@ def _is_public_url(url):
         return False
     try:
         infos = socket.getaddrinfo(parsed.hostname, parsed.port or 443)
-    except socket.gaierror:
+    except (socket.gaierror, ValueError):
         return False
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
-            return False
-    return True
+    return all(_is_public_ip(info[4][0]) for info in infos)
+
+
+class _PublicOnlyMixin:
+    """Koneksi hanya ke IP publik, dicek saat menyambung — bukan cuma saat URL diperiksa.
+
+    Socket disambungkan ke IP yang sudah dicek, sedangkan SNI & sertifikat TLS
+    tetap memakai nama host. Ini menutup celah DNS rebinding (nama host
+    di-resolve ulang ke IP internal di antara pengecekan dan permintaan).
+    """
+    def _new_conn(self):
+        try:
+            infos = socket.getaddrinfo(self._dns_host, self.port, type=socket.SOCK_STREAM)
+        except socket.gaierror as e:
+            raise NewConnectionError(self, f'Gagal me-resolve {self.host}: {e}') from e
+        ips = [info[4][0] for info in infos]
+        if not ips or not all(_is_public_ip(ip) for ip in ips):
+            raise NewConnectionError(self, f'{self.host} mengarah ke alamat non-publik')
+        # Jangan ubah self._dns_host: urllib3 memakainya juga sebagai self.host (SNI/sertifikat)
+        try:
+            return create_connection((ips[0], self.port), self.timeout,
+                                     source_address=self.source_address, socket_options=self.socket_options)
+        except socket.timeout as e:
+            raise ConnectTimeoutError(self, f'Koneksi ke {self.host} timeout') from e
+        except OSError as e:
+            raise NewConnectionError(self, f'Gagal menyambung ke {self.host}: {e}') from e
+
+
+class _PublicHTTPConnection(_PublicOnlyMixin, HTTPConnection):
+    pass
+
+
+class _PublicHTTPSConnection(_PublicOnlyMixin, HTTPSConnection):
+    pass
+
+
+class _PublicHTTPPool(HTTPConnectionPool):
+    ConnectionCls = _PublicHTTPConnection
+
+
+class _PublicHTTPSPool(HTTPSConnectionPool):
+    ConnectionCls = _PublicHTTPSConnection
+
+
+class _PublicOnlyAdapter(HTTPAdapter):
+    def init_poolmanager(self, *args, **kwargs):
+        super().init_poolmanager(*args, **kwargs)
+        self.poolmanager.pool_classes_by_scheme = {'http': _PublicHTTPPool, 'https': _PublicHTTPSPool}
+
+
+class FetchError(Exception):
+    """Halaman sumber gagal dibuka; `key` & `params` = pesan i18n untuk pengguna."""
+    def __init__(self, key, *params):
+        super().__init__(key)
+        self.key, self.params = key, params
+
+
+def _open_public(session, url, timeout):
+    """Buka URL dengan mengikuti redirect sendiri: setiap lompatan dicek ulang harus publik."""
+    for _ in range(MAX_REDIRECTS + 1):
+        if not _is_public_url(url):
+            raise FetchError('verify-bad-url')
+        try:
+            r = session.get(url, timeout=timeout, allow_redirects=False, stream=True)
+        except requests.RequestException as e:
+            raise FetchError('verify-unreachable') from e
+        if not r.is_redirect:
+            return r, url
+        r.close()
+        url = urljoin(url, r.headers['Location'])
+    raise FetchError('verify-too-many-redirects')
+
+
+def _public_session():
+    session = requests.Session()
+    session.trust_env = False  # jangan lewat proxy dari environment (bisa mengarah ke jaringan internal)
+    session.headers['User-Agent'] = FETCH_UA
+    adapter = _PublicOnlyAdapter(max_retries=0)
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    return session
+
+
+def _read_capped(r, timeout):
+    """Isi respons paling banyak MAX_PAGE_BYTES, dengan batas waktu total (bukan per potongan)."""
+    deadline = time.monotonic() + timeout
+    chunks, size = [], 0
+    try:
+        for chunk in r.iter_content(64 * 1024):
+            chunks.append(chunk)
+            size += len(chunk)
+            if size >= MAX_PAGE_BYTES or time.monotonic() > deadline:
+                break
+    except requests.RequestException as e:
+        raise FetchError('verify-unreachable') from e
+    return b''.join(chunks)[:MAX_PAGE_BYTES]
+
+
+def _decode(body, ctype):
+    """Teks halaman: charset dari header, lalu dari <meta>, bawaan UTF-8."""
+    m = (re.search(r'charset=["\']?([\w.:-]+)', ctype, re.I)
+         or re.search(rb'<meta[^>]+charset=["\']?([\w.:-]+)', body[:4096], re.I))
+    charset = m.group(1) if m else 'utf-8'
+    if isinstance(charset, bytes):
+        charset = charset.decode('ascii', 'ignore')
+    try:
+        return body.decode(charset, errors='replace')
+    except LookupError:
+        return body.decode('utf-8', errors='replace')
+
+
+def fetch_page(url, timeout=20):
+    """Unduh halaman sumber dengan aman. Kembalikan (url_akhir, content_type, isi_bytes).
+
+    Gagal → FetchError. Isi tidak dibaca bila jenis kontennya bukan teks/HTML.
+    """
+    session = _public_session()
+    try:
+        r, final_url = _open_public(session, url, timeout)
+        with r:
+            if r.status_code >= 400:
+                raise FetchError('verify-http-error', r.status_code)
+            ctype = r.headers.get('Content-Type', '')
+            body = _read_capped(r, timeout) if ('html' in ctype or 'text' in ctype) else b''
+        return final_url, ctype, body
+    finally:
+        session.close()
 
 
 def resolve_url(url):
     """Ikuti redirect (mis. tautan grounding Gemini) dan kembalikan URL akhir."""
-    if not _is_public_url(url):
-        return url
+    session = _public_session()
     try:
-        r = requests.get(url, headers={'User-Agent': FETCH_UA}, timeout=15,
-                         allow_redirects=True, stream=True)
+        r, final_url = _open_public(session, url, 15)
         r.close()
-        return r.url
-    except requests.RequestException:
+        return final_url
+    except FetchError:
         return url
+    finally:
+        session.close()
+
+
+def _page_title(raw):
+    m = re.search(r'(?is)<title[^>]*>(.*?)</title>', raw)
+    return re.sub(r'\s+', ' ', html.unescape(m.group(1))).strip()[:400] if m else ''
 
 
 def _value_variants(datatype, value):
@@ -493,41 +635,48 @@ VERIFICATION_RANK = {
 def verify(source_url, quote, datatype, value, lang=None):
     """Periksa kutipan & nilai di halaman sumber.
 
-    Kembalikan (status, keterangan). status:
-      terverifikasi     — kutipan ada di halaman dan memuat nilainya
-      nilai_tidak_cocok — kutipan ada di halaman tapi nilainya tidak tertulis di kutipan
-      nilai_di_halaman  — kutipan tidak persis, tapi nilainya tertulis di halaman
-      tidak_terverifikasi — kutipan maupun nilai tidak ditemukan di halaman
-      gagal_dibuka      — halaman tidak bisa dibuka/dibaca otomatis
+    Kembalikan dict:
+      verification — status:
+        terverifikasi     — kutipan ada di halaman dan memuat nilainya
+        nilai_tidak_cocok — kutipan ada di halaman tapi nilainya tidak tertulis di kutipan
+        nilai_di_halaman  — kutipan tidak persis, tapi nilainya tertulis di halaman
+        tidak_terverifikasi — kutipan maupun nilai tidak ditemukan di halaman
+        gagal_dibuka      — halaman tidak bisa dibuka/dibaca otomatis
+      verify_note — keterangan untuk pengguna
+      quote_exact — kutipan tertulis persis di halaman (beda spasi/tanda kutip/huruf
+                    besar saja); hanya kutipan seperti ini yang boleh jadi referensi
+      page_title  — judul halaman (<title>) dari halaman itu sendiri, bukan dari AI
 
     lang: bahasa keterangan; wajib diisi bila dipanggil dari thread lain
     (di luar konteks permintaan Flask).
     """
+    def result(status, key, *params, quote_exact=False, page_title=''):
+        return {'verification': status, 'verify_note': msg(key, *params, lang=lang),
+                'quote_exact': quote_exact, 'page_title': page_title}
+
     if not source_url:
-        return 'gagal_dibuka', msg('verify-no-url', lang=lang)
-    if not _is_public_url(source_url):
-        return 'gagal_dibuka', msg('verify-bad-url', lang=lang)
+        return result('gagal_dibuka', 'verify-no-url')
     try:
-        r = requests.get(source_url, headers={'User-Agent': FETCH_UA}, timeout=20)
-    except requests.RequestException:
-        return 'gagal_dibuka', msg('verify-unreachable', lang=lang)
-    if r.status_code >= 400:
-        return 'gagal_dibuka', msg('verify-http-error', r.status_code, lang=lang)
+        _, ctype, body = fetch_page(source_url)
+    except FetchError as e:
+        return result('gagal_dibuka', e.key, *e.params)
 
-    ctype = r.headers.get('Content-Type', '')
     if 'pdf' in ctype:
-        return 'gagal_dibuka', msg('verify-pdf', lang=lang)
+        return result('gagal_dibuka', 'verify-pdf')
     if 'html' not in ctype and 'text' not in ctype:
-        return 'gagal_dibuka', msg('verify-unsupported', ctype or msg('unknown', lang=lang), lang=lang)
+        return result('gagal_dibuka', 'verify-unsupported', ctype or msg('unknown', lang=lang))
 
-    page = _normalize_text(_html_to_text(r.text))
+    raw = _decode(body, ctype)
+    title = _page_title(raw)
+    page = _normalize_text(_html_to_text(raw))
     q = _normalize_text(quote)
     variants = [_normalize_text(x) for x in _value_variants(datatype, value)]
 
     # Kutipan dibandingkan tanpa spasi: membuang tag HTML sering menyisipkan spasi
     # ("Merapi (bahasa" → "merapi ( bahasa") yang tidak ada di kutipan AI.
     page_compact = page.replace(' ', '')
-    quote_found = len(q) >= 15 and q.replace(' ', '') in page_compact
+    quote_exact = len(q) >= 15 and q.replace(' ', '') in page_compact
+    quote_found = quote_exact
     if not quote_found and len(q) >= 15:
         # Toleransi beda format kecil: ≥70% potongan 5-kata kutipan ada di halaman
         words = q.split()
@@ -538,10 +687,11 @@ def verify(source_url, quote, datatype, value, lang=None):
     value_in_quote = any(v and v in q for v in variants)
     value_in_page = any(v and v in page for v in variants)
 
+    found = {'quote_exact': quote_exact, 'page_title': title}
     if quote_found and value_in_quote:
-        return 'terverifikasi', msg('verify-ok', lang=lang)
+        return result('terverifikasi', 'verify-ok', **found)
     if quote_found:
-        return 'nilai_tidak_cocok', msg('verify-value-mismatch', lang=lang)
+        return result('nilai_tidak_cocok', 'verify-value-mismatch', **found)
     if value_in_page:
-        return 'nilai_di_halaman', msg('verify-value-on-page', lang=lang)
-    return 'tidak_terverifikasi', msg('verify-unverified', lang=lang)
+        return result('nilai_di_halaman', 'verify-value-on-page', **found)
+    return result('tidak_terverifikasi', 'verify-unverified', **found)

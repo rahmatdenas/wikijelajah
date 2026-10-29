@@ -130,8 +130,7 @@ def _verify_source(datatype, value, src, lang):
     url = src['url']
     if 'vertexaisearch.cloud.google.com' in url:
         url = ai_search.resolve_url(url)  # tautan grounding Gemini adalah redirect
-    verification, verify_note = ai_search.verify(url, src['quote'], datatype, value, lang)
-    return {**src, 'url': url, 'verification': verification, 'verify_note': verify_note}
+    return {**src, 'url': url, **ai_search.verify(url, src['quote'], datatype, value, lang)}
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +167,12 @@ def _monolingual(prop, text, lang):
 
 
 def _build_reference(src):
-    """Snak referensi satu sumber: URL (P854), tanggal diakses (P813), judul (P1476), kutipan (P1683)."""
+    """Snak referensi satu sumber: URL (P854), tanggal diakses (P813), judul (P1476), kutipan (P1683).
+
+    Judul & kutipan hanya dari yang terbukti ada di halaman sumber: judul dari
+    <title> halaman, kutipan hanya bila tertulis persis di halaman. Teks karangan
+    AI tidak pernah ditulis ke Wikidata.
+    """
     lang = src.get('quote_language') or 'und'
     snaks = {
         'P854': [{'snaktype': 'value', 'property': 'P854',
@@ -176,11 +180,23 @@ def _build_reference(src):
         'P813': [{'snaktype': 'value', 'property': 'P813',
                   'datavalue': {'type': 'time', 'value': today_time_value()}}],
     }
-    if src.get('title'):
-        snaks['P1476'] = [_monolingual('P1476', src['title'], lang)]
-    if src.get('quote'):
+    if src.get('page_title'):
+        snaks['P1476'] = [_monolingual('P1476', src['page_title'], 'und')]
+    if src.get('quote') and src.get('quote_exact'):
         snaks['P1683'] = [_monolingual('P1683', src['quote'], lang)]
     return snaks
+
+
+def _confirm_reasons(cand, ref_source, raw_value):
+    """Alasan persetujuan perlu konfirmasi tambahan dari pengguna (kosong = aman)."""
+    reasons = []
+    if not ref_source:
+        reasons.append(msg('api-confirm-no-source'))
+    elif ref_source.get('verification') != 'terverifikasi':
+        reasons.append(msg('api-confirm-unverified', ref_source.get('verify_note') or msg('unknown')))
+    if cand['datatype'] != 'item' and raw_value != (cand.get('value') or ''):
+        reasons.append(msg('api-confirm-value-changed'))
+    return reasons
 
 
 @api.route('/enrich/candidates/<int:cand_id>/approve', methods=['POST'])
@@ -214,6 +230,11 @@ def enrich_approve(cand_id):
         return jsonify({'error': msg('api-reference-invalid')}), 400
     ref_source = sources[src_index] if sources and sources[src_index].get('url') else None
 
+    # Sumber belum terverifikasi / nilai diubah → pengguna harus menegaskan sudah memeriksa sendiri
+    reasons = _confirm_reasons(cand, ref_source, raw_value)
+    if reasons and body.get('confirm_unverified') is not True:
+        return jsonify({'error': reasons[0], 'needs_confirm': True, 'confirm_reasons': reasons}), 409
+
     api_url = current_app.config['WIKIMEDIA_API_BASE']
     headers = {'User-Agent': _ua()}
     qid, pid = cand['qid'], cand['pid']
@@ -231,7 +252,7 @@ def enrich_approve(cand_id):
 
     oauth = _get_authed_session()
     chosen = ref_source or {}
-    source = chosen.get('title') or urlparse(chosen.get('url') or '').hostname or 'sumber web'
+    source = chosen.get('page_title') or urlparse(chosen.get('url') or '').hostname or 'sumber web'
     summary = f'Menambah {pid} dari "{source[:80]}" via WikiJelajah (Enrich Data) #WikiJelajah'
 
     try:
