@@ -325,3 +325,176 @@ def localized_wilayah(lang, api_url, user_agent):
         return sorted(out, key=lambda p: p[1].casefold())
 
     return relabel(WILAYAH_PROVINSI), {benua: relabel(n) for benua, n in WILAYAH_LUAR_NEGERI.items()}
+
+
+# ---------------------------------------------------------------------------
+# KONTEKS BUTIR UNTUK PENCARIAN AI
+# Diambil langsung dari Wikidata agar berlaku untuk butir dari negara mana pun,
+# tidak bergantung pada pilihan wilayah di halaman.
+# ---------------------------------------------------------------------------
+_NON_WIKIPEDIA_SITES = {'commonswiki', 'specieswiki', 'metawiki', 'wikidatawiki', 'mediawikiwiki',
+                        'outreachwiki', 'wikimaniawiki', 'sourceswiki', 'incubatorwiki', 'wikifunctionswiki'}
+
+
+def _claim_values(ent, pid):
+    """Nilai pernyataan (bukan deprecated), peringkat preferred lebih dulu."""
+    claims = [c for c in ent.get('claims', {}).get(pid, [])
+              if c.get('rank') != 'deprecated' and c.get('mainsnak', {}).get('snaktype') == 'value']
+    claims.sort(key=lambda c: c.get('rank') != 'preferred')
+    return [c['mainsnak']['datavalue']['value'] for c in claims]
+
+
+def _entity_ids(values, limit):
+    return [v['id'] for v in values if isinstance(v, dict) and v.get('id')][:limit]
+
+
+def _pick_label(labels, lang):
+    for code in ('en', 'mul', lang):
+        if code in labels:
+            return labels[code]['value']
+    return next(iter(labels.values()), {}).get('value', '')
+
+
+def _wikipedia_langs(sitelinks):
+    """Kode bahasa Wikipedia tempat butir punya artikel (petunjuk bahasa lokal butir)."""
+    out = {}
+    for site, link in sitelinks.items():
+        if site.endswith('wiki') and site not in _NON_WIKIPEDIA_SITES:
+            out[site.removesuffix('wiki').replace('_', '-')] = link.get('title', '')
+    return out
+
+
+_COUNTRY_LANG_TTL = 7 * 24 * 3600
+_country_langs_cache = {}  # QID negara → (kedaluwarsa, [kode bahasa Wikimedia])
+
+
+def _country_languages(country_qids, sparql_url, user_agent):
+    """Kode bahasa resmi negara (P37 → P424), disimpan di cache seminggu."""
+    now = time.time()
+    missing = [q for q in country_qids if _country_langs_cache.get(q, (0,))[0] < now]
+    if missing and sparql_url:
+        query = ('SELECT ?c ?code WHERE { VALUES ?c { %s } ?c wdt:P37 ?l . ?l wdt:P424 ?code . }'
+                 % ' '.join(f'wd:{q}' for q in missing))
+        try:
+            rows = requests.get(sparql_url, params={'query': query, 'format': 'json'},
+                                headers={'User-Agent': user_agent}, timeout=10).json()['results']['bindings']
+            found = {q: [] for q in missing}
+            for row in rows:
+                found[row['c']['value'].rsplit('/', 1)[-1]].append(row['code']['value'])
+            for q, codes in found.items():
+                _country_langs_cache[q] = (now + _COUNTRY_LANG_TTL, codes)
+        except (requests.RequestException, ValueError, KeyError):
+            pass  # tanpa bahasa resmi pun konteks tetap berguna; coba lagi di pencarian berikutnya
+    return [code for q in country_qids for code in _country_langs_cache.get(q, (0, []))[1]]
+
+
+# Satu pencarian massal memeriksa banyak atribut dari butir yang sama: tanpa cache,
+# setiap sel memanggil Wikidata lagi dan cepat terkena batas laju (HTTP 429).
+_ENTITY_TTL = 3600
+_REF_LABEL_TTL = 24 * 3600
+_CACHE_MAX = 5000
+_entity_cache = {}     # QID → (kedaluwarsa, entitas)
+_ref_label_cache = {}  # (ID, bahasa) → (kedaluwarsa, label)
+
+
+def _cache_put(cache, key, value, ttl):
+    if len(cache) >= _CACHE_MAX:
+        cache.clear()
+    cache[key] = (time.time() + ttl, value)
+
+
+def _cache_get(cache, key):
+    expires, value = cache.get(key, (0, None))
+    return value if time.time() < expires else None
+
+
+def _get_entity(qid, api_url, headers):
+    ent = _cache_get(_entity_cache, qid)
+    if ent is None:
+        resp = requests.get(api_url, params={
+            'action': 'wbgetentities', 'ids': qid, 'format': 'json',
+            'props': 'labels|aliases|descriptions|claims|sitelinks',
+        }, headers=headers, timeout=10)
+        resp.raise_for_status()
+        ent = resp.json()['entities'][qid]
+        _cache_put(_entity_cache, qid, ent, _ENTITY_TTL)
+    return ent
+
+
+def _ref_labels(ids, lang, api_url, headers):
+    """Label (utamakan bahasa Inggris) untuk QID/PID rujukan; yang gagal diambil dilewati."""
+    labels = {i: _cache_get(_ref_label_cache, (i, lang)) for i in ids}
+    missing = [i for i, label in labels.items() if label is None]
+    if missing:
+        try:
+            resp = requests.get(api_url, params={
+                'action': 'wbgetentities', 'ids': '|'.join(missing[:50]), 'props': 'labels',
+                'languages': f'en|mul|{lang}', 'format': 'json',
+            }, headers=headers, timeout=10)
+            resp.raise_for_status()
+            for i, e in resp.json().get('entities', {}).items():
+                labels[i] = _pick_label(e.get('labels', {}), lang)
+                _cache_put(_ref_label_cache, (i, lang), labels[i], _REF_LABEL_TTL)
+        except (requests.RequestException, ValueError):
+            pass
+    return {i: label for i, label in labels.items() if label}
+
+
+def item_context(qid, lang, api_url, user_agent, extra_ids=(), sparql_url=None):
+    """Konteks butir untuk prompt AI, atau None bila Wikidata gagal dihubungi.
+
+    Berisi nama dalam bahasa lokal butir, bahasa Inggris & bahasa antarmuka, alias,
+    deskripsi, jenis (P31), lokasi (P131), negara (P17), koordinat (P625), situs
+    resmi (P856) dan judul artikel Wikipedia. Bahasa lokal ditentukan dari nama
+    resmi/asli butir (P1448/P1705) dan bahasa resmi negaranya. Label rujukan diambil
+    dalam bahasa Inggris (bahasa kerja AI). extra_ids (mis. properti & satuan yang
+    dicari) ikut diberi label: hasilnya di ctx['labels'].
+    """
+    headers = {'User-Agent': user_agent}
+    try:
+        ent = _get_entity(qid, api_url, headers)
+    except (requests.RequestException, ValueError, KeyError):
+        return None
+    if 'missing' in ent:
+        return None
+
+    claims = {pid: _claim_values(ent, pid) for pid in ('P31', 'P131', 'P17', 'P625', 'P856', 'P1448', 'P1705')}
+    refs = {'P31': _entity_ids(claims['P31'], 3), 'P131': _entity_ids(claims['P131'], 2),
+            'P17': _entity_ids(claims['P17'], 2)}
+    wanted = list(dict.fromkeys([q for ids in refs.values() for q in ids] + [i for i in extra_ids if i]))
+
+    labels = _ref_labels(wanted, lang, api_url, headers)
+    named = lambda ids: [labels[i] for i in ids if labels.get(i)]
+
+    # Bahasa lokal butir: dari nama resmi/asli (P1448/P1705, membawa kode bahasa)
+    # dan bahasa resmi negaranya. Nama & artikel dalam bahasa lain tidak membantu pencarian.
+    local_names = [(v['text'], v['language']) for v in claims['P1448'] + claims['P1705']
+                   if isinstance(v, dict) and v.get('text')]
+    local_langs = list(dict.fromkeys([code for _, code in local_names]
+                                     + _country_languages(refs['P17'], sparql_url, user_agent)))
+    useful = list(dict.fromkeys([*local_langs, 'en', 'mul', lang]))
+    wiki = _wikipedia_langs(ent.get('sitelinks', {}))
+    wiki = {code: wiki[code] for code in useful if code in wiki}
+    names = {}
+    for code in useful:
+        name = ent.get('labels', {}).get(code, {}).get('value')
+        if name and name not in names.values():  # nama yang sama di beberapa bahasa cukup sekali
+            names[code] = name
+    aliases = [a['value'] for code in ('en', lang) for a in ent.get('aliases', {}).get(code, [])]
+    descriptions = ent.get('descriptions', {})
+    coord = claims['P625'][0] if claims['P625'] else None
+
+    return {
+        'names': names,
+        'local_names': list(dict.fromkeys(local_names))[:3],
+        'aliases': list(dict.fromkeys(aliases))[:5],
+        'description': (descriptions.get('en') or descriptions.get(lang) or {}).get('value', ''),
+        'instance_of': named(refs['P31']),
+        'located_in': named(refs['P131']),
+        'country': named(refs['P17']),
+        'coordinates': f"{coord['latitude']:.5f}, {coord['longitude']:.5f}" if coord else '',
+        'website': claims['P856'][0] if claims['P856'] else '',
+        'wikipedia': dict(list(wiki.items())[:4]),
+        'local_languages': local_langs[:4],
+        'labels': labels,
+    }

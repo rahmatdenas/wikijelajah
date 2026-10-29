@@ -15,6 +15,7 @@ from ..utils.datavalue import DATATYPES, DataValueError, build_value, today_time
 from ..utils.enrich_store import (
     get_candidate, list_candidates, reject_siblings, save_cell_candidates, update_candidate,
 )
+from ..utils.wikidata import item_context
 
 STATUS_GROUPS = {
     'open': ('pending', 'not_found'),
@@ -68,6 +69,11 @@ def enrich_search():
         'unit_label': _clip(attr.get('unit_label'), 20),
     }
     model = _clip(body.get('model'), 100) or ai_search.DEFAULT_MODELS[provider]
+    # Konteks butir (negara, lokasi, nama dalam bahasa lokal, ...) langsung dari Wikidata;
+    # gagal → prompt memakai data dari halaman saja
+    item_data['context'] = item_context(qid, get_lang(), current_app.config['WIKIMEDIA_API_BASE'], _ua(),
+                                        extra_ids=(pid, unit),
+                                        sparql_url=current_app.config['WIKIDATA_SPARQL_ENDPOINT'])
 
     try:
         result = ai_search.search(provider, _clip(body.get('api_key'), 400), model, item_data, attr_data,

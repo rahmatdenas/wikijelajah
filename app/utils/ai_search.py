@@ -43,14 +43,15 @@ AI_TIMEOUT = 180  # detik — pencarian web + penalaran bisa lama
 MAX_PAGE_BYTES = 5 * 1024 * 1024  # halaman sumber dibaca paling banyak 5 MB
 MAX_REDIRECTS = 5
 
-SYSTEM_PROMPT = """You are a research assistant for Wikidata editors in Indonesia.
+SYSTEM_PROMPT = """You are a research assistant for Wikidata editors.
 Your job: find the value of ONE property of ONE Wikidata item, using web search.
 
 Rules:
 - Never guess or rely on memory. Only report a value that is stated in a web page you actually retrieved.
 - For every source, copy an exact quote (one or two sentences, max ~300 characters) from that page that contains the value. Do not paraphrase or translate the quote.
-- Prefer authoritative sources: Indonesian government sites (.go.id), official institution websites, academic publications, reputable news media. Avoid Wikipedia, Wikidata and their mirrors, social media, forums and travel blogs when better sources exist.
-- Make sure each source is about the same entity (check name AND location).
+- Prefer authoritative sources: the item's own official website, government and public-sector sites of the country/region where the item is (national, regional or local), official registries, academic publications, reputable news media. Avoid Wikipedia, Wikidata and their mirrors, social media, forums and travel blogs when better sources exist.
+- Search in the local language(s) of the item's country as well as in English, using the item's names in those languages: local sources are often the most detailed.
+- Make sure each source is about the same entity: check the name AND the location (place and country). Many places, buildings and organisations share a name.
 - If several sources agree on the same value, list them all under that value (max 3 sources per value).
 - If reliable sources disagree, report each distinct value separately with its own sources (max 3 values). Do not pick one and hide the other.
 - If you cannot find a reliable source, answer with found=false. A missing value is far better than a wrong one.
@@ -107,22 +108,50 @@ class AISearchError(Exception):
 # PROMPT
 # ---------------------------------------------------------------------------
 
+def _item_lines(item):
+    """Deskripsi butir untuk AI. Utamakan konteks dari Wikidata (item['context']);
+    tanpa itu, pakai data dari halaman (label, kategori, lokasi)."""
+    ctx = item.get('context')
+    if not ctx:
+        return [
+            f"Wikidata item: {item['label']} ({item['qid']})",
+            f"Description: {item.get('description') or '-'}",
+            f"Category: {item.get('kategori') or '-'}",
+            f"Location: {item.get('lokasi') or '-'}",
+        ]
+    names = '; '.join(f'{code}: {name}' for code, name in ctx['names'].items()) or item['label']
+    optional = [
+        ('Official/native name', '; '.join(f'{code}: {text}' for text, code in ctx['local_names'])),
+        ('Also known as', '; '.join(ctx['aliases'])),
+        ('Description', ctx['description'] or item.get('description')),
+        ('Instance of', ', '.join(ctx['instance_of']) or item.get('kategori')),
+        ('Located in', ', '.join(ctx['located_in']) or item.get('lokasi')),
+        ('Country', ', '.join(ctx['country'])),
+        ('Local language codes', ', '.join(ctx['local_languages'])),
+        ('Coordinates', ctx['coordinates']),
+        ('Official website', ctx['website']),
+        ('Wikipedia articles (search hints only, not sources)',
+         '; '.join(f'{code}: {title}' for code, title in ctx['wikipedia'].items())),
+    ]
+    return ([f"Wikidata item: {item['qid']}", f'Names: {names}']
+            + [f'{key}: {value}' for key, value in optional if value])
+
+
 def build_prompt(item, attr):
+    # Label properti & satuan dalam bahasa Inggris dari Wikidata; label di halaman bisa sudah diterjemahkan
+    labels = (item.get('context') or {}).get('labels', {})
     unit_label = attr.get('unit_label') or ''
-    unit = (UNIT_NAMES.get(unit_label) or UNIT_QID_NAMES.get(attr.get('unit') or '') or unit_label
+    unit = (labels.get(attr.get('unit') or '') or UNIT_NAMES.get(unit_label)
+            or UNIT_QID_NAMES.get(attr.get('unit') or '') or unit_label
             or 'no unit (a plain count or number)')
     fmt = VALUE_FORMAT[attr['type']].format(unit=unit)
+    prop = labels.get(attr['pid']) or attr['label']
 
-    lines = [
-        f"Wikidata item: {item['label']} ({item['qid']})",
-        f"Description: {item.get('description') or '-'}",
-        f"Category: {item.get('kategori') or '-'}",
-        f"Location: {item.get('lokasi') or '-'}",
+    return '\n'.join(_item_lines(item) + [
         '',
-        f"Find the value of the property \"{attr['label']}\" (Wikidata {attr['pid']}) for this item.",
+        f"Find the value of the property \"{prop}\" (Wikidata {attr['pid']}) for this item.",
         f"Value format: {fmt}.",
-    ]
-    return '\n'.join(lines)
+    ])
 
 
 # ---------------------------------------------------------------------------
