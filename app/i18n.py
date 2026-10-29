@@ -99,7 +99,17 @@ def _detect_lang():
     for candidate in (request.args.get('uselang'), request.cookies.get(COOKIE_NAME)):
         if candidate in langs:
             return candidate
-    return request.accept_languages.best_match(langs) or DEFAULT_LANG
+    best = request.accept_languages.best_match(langs)
+    if best:
+        return best
+    # Bahasa browser belum ada terjemahannya: pakai bahasa cadangannya bila ada
+    # (mis. bahasa daerah Indonesia → Indonesia), selain itu bahasa Inggris, yang
+    # paling umum dipahami pengguna dari negara mana pun
+    for code, _ in request.accept_languages:
+        for fallback in FALLBACKS.get(code.split('-')[0].lower(), []):
+            if fallback in langs:
+                return fallback
+    return SOURCE_LANG
 
 
 def messages_for(lang):
