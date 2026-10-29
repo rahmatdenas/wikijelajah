@@ -28,7 +28,7 @@ from ..i18n import msg
 DEFAULT_MODELS = {
     'claude': 'claude-opus-5-5',
     'openai': 'gpt-5',
-    'gemini': 'gemini-2.5-flash',
+    'gemini': 'gemini-3.8-flash',
     'groq': 'openai/gpt-oss-120b',
 }
 
