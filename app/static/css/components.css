@@ -137,6 +137,7 @@ select option { color: var(--color-text); }
   padding: 4px var(--space-2); margin-left: calc(-1 * var(--space-2));
   border: none; border-radius: var(--radius-sm); background: none; cursor: pointer;
   color: var(--color-primary); font-size: var(--text-sm); font-weight: 600;
+   text-decoration: none;
 }
 .back-link:hover { background: var(--color-accent-bg); }
 
