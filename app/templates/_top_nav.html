@@ -64,7 +64,7 @@
       <div id="top-nav-menu" class="top-nav-menu hidden" role="menu">
         {# Nama pengguna di dalam menu hanya tampil di layar sempit (tombolnya cukup ikon) #}
         <span class="top-nav-menu-user">{{ user.username }}</span>
-        <a href="{{ url_for('main.enrich') }}" data-nav-context role="menuitem"
+        <a href="{{ url_for('main.enrich') }}" role="menuitem"
            class="top-nav-menu-item{% if request.endpoint == 'main.enrich' %} active{% endif %}">✨ {{ msg('nav-enrich') }}</a>
         <a href="https://www.mediawiki.org/wiki/User:{{ user.username | urlencode }}" role="menuitem"
            target="_blank" rel="noopener noreferrer"
