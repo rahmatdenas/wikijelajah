@@ -517,9 +517,9 @@ select option { color: var(--color-text); }
 /* Tabel properti dan balok menyatu: sudut bawah tabel dirapatkan */
 .detail-data:has(+ .add-prop) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
 /* Tertutup: seluruh balok adalah tombol. Terbuka: kotak pencarian mengisi lebar balok */
-.add-prop .link-btn { flex: 1; padding: 10px; border-radius: inherit; color: #fff; }
+.add-prop .link-btn { flex: 1; padding: 11px; border-radius: inherit; color: #fff; }
 .add-prop .link-btn:hover { background: var(--color-primary); text-decoration: none; }
-.add-prop-box { flex: 1; display: flex; align-items: flex-start; gap: var(--space-1); padding: 10px; }
+.add-prop-box { flex: 1; display: flex; align-items: flex-start; gap: var(--space-1); padding: 5px 0px 0px; background:var(--color-surface);}
 .add-prop-field { flex: 1; display: block; }
 .add-prop-field .form-input { width: 100%; }
 .add-prop-list { width: 100%; max-width: none; }
