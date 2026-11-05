@@ -83,15 +83,21 @@ WHERE {
   SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
 }`;
 
-const _T_ITEMS_NATIONAL = `SELECT DISTINCT ?SQ ?sLabel ?PQ ?pLabel ?lLabel ?tM ?tP
+const _T_ITEMS_NATIONAL = `SELECT DISTINCT ?SQ ?sLabel ?PQ ?pLabel ?LQ ?lLabel ?tM ?tP
 WHERE {
-  <FILTER_NASIONAL>
-  ?s <P31_MATCH> ?j .
-  VALUES ?j { <JENIS> }
-  OPTIONAL {
-    ?p wdt:P31 wd:Q5098 .
-    ?s wdt:<PROP_LOKASI> ?l .
-    ?l wdt:P131* ?p .
+  {
+    SELECT DISTINCT ?s ?p ?l WHERE {
+      <FILTER_NASIONAL>
+      ?s <P31_MATCH> ?j .
+      VALUES ?j { <JENIS> }
+      OPTIONAL {
+        ?p wdt:P31 wd:Q5098 .
+        ?s wdt:<PROP_LOKASI> ?l .
+        ?l wdt:P131* ?p .
+      }
+    }
+    ORDER BY ?s ?p ?l
+    LIMIT <LIMIT> OFFSET <OFFSET>
   }
   OPTIONAL {
     ?s p:<PROP_TAHUN> ?iS .
@@ -100,6 +106,7 @@ WHERE {
   }
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
+  BIND(SUBSTR(STR(?l),32) AS ?LQ)
   SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
 }`;
 
