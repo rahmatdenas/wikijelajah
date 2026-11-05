@@ -96,7 +96,7 @@ function mapInit(onMarkerClick) {
   logo.addTo(_map);
 
   // Keterangan warna marker
-  const legenda = L.control({ position: 'topright' });
+  const legenda = L.control({ position: 'topleft' });
   legenda.onAdd = () => {
     const el = L.DomUtil.create('div', 'map-legend');
     el.innerHTML = `
