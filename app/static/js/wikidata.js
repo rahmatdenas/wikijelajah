@@ -101,7 +101,6 @@ WHERE {
   BIND(SUBSTR(STR(?s),32) AS ?SQ)
   BIND(SUBSTR(STR(?p),32) AS ?PQ)
   SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
-  LIMIT <LIMIT> OFFSET <OFFSET>
 }`;
 
 const _T_ITEMS_ABROAD = `SELECT DISTINCT ?SQ ?sLabel ?PQ ?pLabel ?LQ ?lLabel ?tM ?tP
