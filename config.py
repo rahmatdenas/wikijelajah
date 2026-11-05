@@ -24,6 +24,11 @@ class Config:
     # di lokal kosong sehingga memakai folder instance/ seperti biasa.
     DATA_DIR = os.environ.get('DATA_DIR') or os.environ.get('TOOL_DATA_DIR')
 
+    # Formulir masukan peserta (tautan "Nilai Kami" di menu atas)
+    FEEDBACK_FORM_URL = os.environ.get(
+        'FEEDBACK_FORM_URL',
+        'https://docs.google.com/forms/d/e/1FAIpQLSf2ENOjWOEScelhDfyPEP4tTtKGeeEI7xeqkMzc-xmrr3K3_Q/viewform')
+
     APP_NAME = 'WikiJelajah'
     APP_TAGLINE = 'Visualisasi Wikidata Interaktif'
 

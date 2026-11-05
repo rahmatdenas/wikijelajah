@@ -434,6 +434,8 @@
 	"map-attribution": "Start of the map attribution, followed by \"© OSM contributors\".\n{{Identical|Map}}",
 	"map-legend-photo": "Map legend: marker colour of items with a photo.",
 	"nav-help": "Top navigation button that opens the short usage guide.",
+	"nav-feedback": "Top navigation link to the feedback form.",
+	"nav-feedback-title": "Tooltip of the feedback link in the top navigation.",
 	"guide-title": "Title of the short guide dialog shown on the first visit.",
 	"guide-intro": "Introductory sentence of the guide dialog.",
 	"guide-explore-title": "Guide step 1 title.",
