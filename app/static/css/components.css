@@ -446,9 +446,7 @@ select option { color: var(--color-text); }
 
 .detail-data {
   list-style: none; margin: 0; padding: 0;
-  border: 1px solid var(--color-border); 
-/* Radiusdihapus border-radius: var(--radius-md);   */
-   overflow: visible;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: visible;
 }
 .detail-data-row {
   display: grid; grid-template-columns: 38% 1fr; gap: var(--space-3);
@@ -470,8 +468,11 @@ select option { color: var(--color-text); }
 .prop-add-btn:hover { background: var(--color-accent-bg); border-style: solid; }
 
 .prop-edit-inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); width: 100%; }
-.prop-edit-input { height: 32px; width: 139px; font-size: var(--text-sm); }
-.prop-edit-input--item { width: 139px; max-width: 220px; }
+/* Kotak isian mengisi sisa baris; satuan dan tombol ✓ ✕ tetap selebar isinya */
+.prop-edit-inline > .prop-edit-field { flex: 1 1 0; min-width: 80px; max-width: 220px; }
+/* Ada dropdown satuan: tidak muat sebaris, jadi kotak isian satu baris penuh, [satuan ✓ ✕] di bawahnya */
+.prop-edit-inline:has(.prop-unit-select) > .prop-edit-field { flex-basis: 100%; max-width: none; }
+.prop-edit-input { height: 32px; width: 100%; font-size: var(--text-sm); }
 .prop-edit-unit { color: var(--color-text-muted); font-size: var(--text-sm); }
 
 .prop-edit-field { position: relative; display: inline-block; }
@@ -506,9 +507,13 @@ select option { color: var(--color-text); }
 .prop-unit-select { width: auto; min-width: 72px; height: 32px; }
 
 /* --- Tambah data lain (properti di luar skema kategori) --- */
-.add-prop .link-btn {width:100%; align-items: center;height: 42px; margin-top: -10px; color: white; /* margin-top: var(--space-2); */background: #720f0f;padding: 10px;display: flex;}
-.add-prop  {margin-top: var(--space-2);}
-.add-prop-box { display: flex; align-items: flex-start; gap: var(--space-1); }
+.add-prop { display: flex; background: var(--color-primary-dark); border-radius: 0 0 var(--radius-md) var(--radius-md); }
+/* Tabel properti dan balok menyatu: sudut bawah tabel dirapatkan */
+.detail-data:has(+ .add-prop) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+/* Tertutup: seluruh balok adalah tombol. Terbuka: kotak pencarian mengisi lebar balok */
+.add-prop .link-btn { flex: 1; padding: 10px; border-radius: inherit; color: #fff; }
+.add-prop .link-btn:hover { background: var(--color-primary); text-decoration: none; }
+.add-prop-box { flex: 1; display: flex; align-items: flex-start; gap: var(--space-1); padding: 10px; }
 .add-prop-field { flex: 1; display: block; }
 .add-prop-field .form-input { width: 100%; }
 .add-prop-list { width: 100%; max-width: none; }

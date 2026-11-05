@@ -1046,7 +1046,7 @@ function renderEmptyPropRow(attr) {
       : `<a href="${loginUrl()}" class="prop-add-btn" title="${escHtml(msg('detail-login-to-fill'))}">${escHtml(msg('detail-add-manual'))}</a>`}
       <span class="prop-edit-inline hidden">
         <span class="prop-edit-field">
-          <input type="${inputType}" class="form-input prop-edit-input${attr.type === 'item' ? ' prop-edit-input--item' : ''}"
+          <input type="${inputType}" class="form-input prop-edit-input"
                  placeholder="${escHtml(INPUT_PLACEHOLDER[attr.type] || '')}" autocomplete="off"${extraAttr}
                  aria-label="${escHtml(attr.label)}">
           ${attr.type === 'item' ? '<ul class="prop-suggest hidden" role="listbox"></ul>' : ''}
