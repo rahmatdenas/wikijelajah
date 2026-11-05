@@ -66,6 +66,8 @@
         <span class="top-nav-menu-user">{{ user.username }}</span>
         <a href="{{ url_for('main.enrich') }}" role="menuitem"
            class="top-nav-menu-item{% if request.endpoint == 'main.enrich' %} active{% endif %}">✨ {{ msg('nav-enrich') }}</a>
+        {# Modal Pengaturan AI ada di semua halaman bagi pengguna yang masuk (_ai_settings.html) #}
+        <button type="button" role="menuitem" class="top-nav-menu-item js-open-ai-settings">⚙️ {{ msg('pk-settings') }}</button>
         <a href="https://www.mediawiki.org/wiki/User:{{ user.username | urlencode }}" role="menuitem"
            target="_blank" rel="noopener noreferrer"
            class="top-nav-menu-item">{{ msg('nav-profile') }} ↗</a>

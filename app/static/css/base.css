@@ -125,6 +125,7 @@ button { font-family: inherit; }
   font-size: var(--text-md); font-weight: 500;
 }
 .top-nav-menu-item:hover { background: var(--color-gray-100); }
+button.top-nav-menu-item { width: 100%; border: 0; background: none; text-align: left; font-family: inherit; cursor: pointer; }
 .top-nav-menu-item.active { color: var(--color-primary); font-weight: 700; background: var(--color-accent-bg); }
 .top-nav-menu-item--logout { color: var(--color-primary); }
 .top-nav-menu-user {

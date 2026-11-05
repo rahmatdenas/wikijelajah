@@ -1,6 +1,6 @@
 """Pencarian nilai atribut Wikidata dengan AI + verifikasi kutipan ke halaman sumber.
 
-Alur: AI (Claude / OpenAI / Gemini, masing-masing dengan pencarian web bawaan)
+Alur: AI (Claude / OpenAI / Gemini / Groq / OpenRouter / Grok / DeepSeek, masing-masing dengan pencarian web)
 diminta mencari satu nilai untuk satu butir & atribut, lalu menjawab JSON berisi
 nilai, sumber, dan kutipan persis. Server kemudian membuka halaman sumber sendiri
 untuk memastikan kutipan dan nilainya memang ada di sana — AI tidak dipercaya
@@ -30,7 +30,16 @@ DEFAULT_MODELS = {
     'openai': 'gpt-5',
     'gemini': 'gemini-3.8-flash',
     'groq': 'openai/gpt-oss-120b',
+    'openrouter': 'google/gemini-3.8-flash',
+    'grok': 'grok-4.7',
+    'deepseek': 'deepseek-flash',
 }
+
+OPENROUTER_BASE_URL = 'https://openrouter.ai/api/v1'
+XAI_BASE_URL = 'https://api.x.ai/v1'  # Grok: Responses API kompatibel OpenAI
+DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
+DEEPSEEK_MAX_ROUNDS = 8           # putaran model ↔ alat sebelum model diminta menjawab
+DEEPSEEK_TOOL_RESULT_CHARS = 8000  # hasil alat dipotong agar muat di konteks model
 
 # Model Groq yang mendukung pencarian web (browser_search), urut prioritas.
 # Bila model pilihan gagal (tidak tersedia, kuota habis, error server), model
@@ -177,6 +186,12 @@ def search(provider, api_key, model, item, attr, note_lang='id'):
         text, citations = _search_gemini(api_key, model, system, prompt)
     elif provider == 'groq':
         text, citations, model = _search_groq(api_key, model, system, prompt)
+    elif provider == 'openrouter':
+        text, citations = _search_openrouter(api_key, model, system, prompt)
+    elif provider == 'grok':
+        text, citations = _search_openai(api_key, model, system, prompt, label='Grok', base_url=XAI_BASE_URL)
+    elif provider == 'deepseek':
+        text, citations = _search_deepseek(api_key, model, system, prompt)
     else:
         raise AISearchError(msg('api-provider-invalid'))
 
@@ -256,10 +271,11 @@ def _search_claude(api_key, model, system, prompt):
     return ''.join(text_parts), citations
 
 
-def _search_openai(api_key, model, system, prompt):
+def _search_openai(api_key, model, system, prompt, label='OpenAI', base_url=None):
+    """Responses API + web_search. Dipakai juga untuk Grok (xAI), yang API-nya kompatibel."""
     import openai
 
-    client = openai.OpenAI(api_key=api_key, timeout=AI_TIMEOUT)
+    client = openai.OpenAI(api_key=api_key, base_url=base_url, timeout=AI_TIMEOUT)
     try:
         resp = client.responses.create(
             model=model,
@@ -268,13 +284,16 @@ def _search_openai(api_key, model, system, prompt):
             tools=[{'type': 'web_search'}],
         )
     except openai.AuthenticationError:
-        raise AISearchError(msg('ai-key-invalid', 'OpenAI'), fatal=True) from None
+        raise AISearchError(msg('ai-key-invalid', label), fatal=True) from None
+    except openai.PermissionDeniedError as e:
+        # Mis. akun xAI tanpa kredit: tampilkan alasan dari penyedia
+        raise AISearchError(msg('ai-request-rejected', label, f'{e.status_code}: {e.message}'), fatal=True) from None
     except openai.RateLimitError:
-        raise AISearchError(msg('ai-rate-limited', 'OpenAI'), fatal=True) from None
+        raise AISearchError(msg('ai-rate-limited', label), fatal=True) from None
     except openai.APIStatusError as e:
-        raise AISearchError(msg('ai-request-rejected', 'OpenAI', f'{e.status_code}: {e.message}')) from None
+        raise AISearchError(msg('ai-request-rejected', label, f'{e.status_code}: {e.message}')) from None
     except openai.APIConnectionError:
-        raise AISearchError(msg('ai-connection-failed', 'OpenAI')) from None
+        raise AISearchError(msg('ai-connection-failed', label)) from None
 
     citations = []
     for out in resp.output or []:
@@ -283,7 +302,9 @@ def _search_openai(api_key, model, system, prompt):
         for part in out.content or []:
             for a in getattr(part, 'annotations', None) or []:
                 if getattr(a, 'type', '') == 'url_citation':
-                    citations.append({'url': a.url, 'title': getattr(a, 'title', '') or ''})
+                    title = getattr(a, 'title', '') or ''
+                    # Grok mengisi title dengan nomor sitasi ("1"), bukan judul halaman
+                    citations.append({'url': a.url, 'title': '' if title.isdigit() else title})
     return resp.output_text or '', citations
 
 
@@ -371,6 +392,157 @@ def _search_groq(api_key, model, system, prompt):
         return reply.content, citations, m
 
     raise AISearchError(msg('ai-groq-all-failed', '; '.join(failures)))
+
+
+def _search_openrouter(api_key, model, system, prompt):
+    """OpenRouter (API kompatibel OpenAI) + plugin web: pencarian web selalu dijalankan,
+    untuk model apa pun termasuk model gratis (:free). Biaya pencarian tetap ditagih OpenRouter."""
+    import openai
+
+    client = openai.OpenAI(api_key=api_key, base_url=OPENROUTER_BASE_URL, timeout=AI_TIMEOUT,
+                           default_headers={'X-Title': 'WikiJelajah'})
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {'role': 'system', 'content': system},
+                {'role': 'user', 'content': prompt},
+            ],
+            extra_body={'plugins': [{'id': 'web'}]},
+        )
+    except openai.AuthenticationError:
+        raise AISearchError(msg('ai-key-invalid', 'OpenRouter'), fatal=True) from None
+    except openai.PermissionDeniedError:
+        raise AISearchError(msg('ai-no-access', 'OpenRouter'), fatal=True) from None
+    except openai.RateLimitError:
+        raise AISearchError(msg('ai-rate-limited', 'OpenRouter'), fatal=True) from None
+    except openai.APIStatusError as e:
+        if e.status_code == 402:  # saldo kurang; pencarian web berbayar walau modelnya gratis
+            raise AISearchError(msg('ai-credits-exhausted', 'OpenRouter'), fatal=True) from None
+        raise AISearchError(msg('ai-request-rejected', 'OpenRouter', f'{e.status_code}: {e.message}')) from None
+    except openai.APIConnectionError:
+        raise AISearchError(msg('ai-connection-failed', 'OpenRouter')) from None
+
+    if not resp.choices:
+        raise AISearchError(msg('ai-status-error', 'OpenRouter', getattr(resp, 'error', None) or '?'))
+    reply = resp.choices[0].message  # jangan dinamai `msg`: menimpa fungsi i18n msg()
+
+    citations = []
+    for a in getattr(reply, 'annotations', None) or []:
+        cite = getattr(a, 'url_citation', None)
+        if getattr(a, 'type', '') == 'url_citation' and cite and cite.url:
+            citations.append({'url': cite.url, 'title': getattr(cite, 'title', '') or ''})
+    return reply.content or '', citations
+
+
+# Model DeepSeek tidak bisa mencari sendiri: ia memanggil alat ini, server menjalankannya
+# lewat Search / Fetch API DeepSeek (key yang sama, ditagih per permintaan)
+_DEEPSEEK_TOOLS = [
+    {'type': 'function', 'function': {
+        'name': 'web_search',
+        'description': 'Search the web. Returns titles, URLs and snippets of matching pages.',
+        'parameters': {'type': 'object', 'required': ['query'], 'properties': {
+            'query': {'type': 'string', 'description': 'Search query (max 128 characters)'},
+        }},
+    }},
+    {'type': 'function', 'function': {
+        'name': 'web_fetch',
+        'description': 'Open one web page and return its title and text content as Markdown.',
+        'parameters': {'type': 'object', 'required': ['url'], 'properties': {
+            'url': {'type': 'string', 'description': 'Full URL of the page'},
+        }},
+    }},
+]
+
+
+def _deepseek_tool(api_key, endpoint, payload):
+    """Panggil Search / Fetch API DeepSeek. Halaman yang tak bisa dibuka dikembalikan sebagai
+    pesan galat untuk model; key salah, saldo habis, dan batas pemakaian menghentikan pencarian."""
+    try:
+        r = requests.post(f'{DEEPSEEK_BASE_URL}/v1/tools/{endpoint}', json=payload, timeout=AI_TIMEOUT,
+                          headers={'Authorization': f'Bearer {api_key}'})
+    except requests.RequestException:
+        raise AISearchError(msg('ai-connection-failed', 'DeepSeek')) from None
+    if r.status_code == 401:
+        raise AISearchError(msg('ai-key-invalid', 'DeepSeek'), fatal=True)
+    if r.status_code == 402:
+        raise AISearchError(msg('ai-balance-insufficient', 'DeepSeek'), fatal=True)
+    if r.status_code == 429:
+        raise AISearchError(msg('ai-rate-limited', 'DeepSeek'), fatal=True)
+    try:
+        data = r.json()
+    except ValueError:
+        data = {}
+    if r.status_code >= 400:  # mis. Fetch ditolak kebijakan keamanan (403) atau halaman tak terbaca (404)
+        return {'error': f'{r.status_code}: {str(data.get("error") or data.get("message") or r.text)[:300]}'}
+    return data
+
+
+def _search_deepseek(api_key, model, system, prompt):
+    """DeepSeek: model memanggil web_search / web_fetch, server menjalankannya lewat Search / Fetch API.
+    Jawaban tanpa satu pun pencarian ditolak: tanpa pencarian, nilainya hanya karangan."""
+    import openai
+
+    client = openai.OpenAI(api_key=api_key, base_url=DEEPSEEK_BASE_URL, timeout=AI_TIMEOUT)
+    messages = [{'role': 'system', 'content': system}, {'role': 'user', 'content': prompt}]
+    searched, fetched = [], []  # sitasi; halaman yang dibuka lebih dulu dipakai sebagai sumber cadangan
+    nudged = False
+
+    for rnd in range(DEEPSEEK_MAX_ROUNDS + 1):
+        last = rnd == DEEPSEEK_MAX_ROUNDS
+        try:
+            resp = client.chat.completions.create(model=model, messages=messages, tools=_DEEPSEEK_TOOLS,
+                                                  tool_choice='none' if last else 'auto')
+        except openai.AuthenticationError:
+            raise AISearchError(msg('ai-key-invalid', 'DeepSeek'), fatal=True) from None
+        except openai.RateLimitError:
+            raise AISearchError(msg('ai-rate-limited', 'DeepSeek'), fatal=True) from None
+        except openai.APIStatusError as e:
+            if e.status_code == 402:
+                raise AISearchError(msg('ai-balance-insufficient', 'DeepSeek'), fatal=True) from None
+            raise AISearchError(msg('ai-request-rejected', 'DeepSeek', f'{e.status_code}: {e.message}')) from None
+        except openai.APIConnectionError:
+            raise AISearchError(msg('ai-connection-failed', 'DeepSeek')) from None
+
+        reply = resp.choices[0].message  # jangan dinamai `msg`: menimpa fungsi i18n msg()
+        calls = reply.tool_calls or []
+        if not calls:
+            if not (searched or fetched):
+                if nudged or last:
+                    raise AISearchError(msg('ai-no-web-search', 'DeepSeek'))
+                nudged = True
+                messages += [{'role': 'assistant', 'content': reply.content or ''},
+                             {'role': 'user', 'content': 'Use the web_search tool first. Do not answer from memory.'}]
+                continue
+            return reply.content or '', fetched + searched
+
+        # Riwayat apa adanya (termasuk reasoning_content), sesuai panduan tool calling DeepSeek
+        messages.append(reply.model_dump(exclude_none=True))
+        for call in calls:
+            try:
+                args = json.loads(call.function.arguments or '{}')
+            except ValueError:
+                args = {}
+            if call.function.name == 'web_search' and args.get('query'):
+                data = _deepseek_tool(api_key, 'search', {'query': str(args['query'])[:128], 'count': 5})
+                rows = data.get('results') or data.get('data') or [] if isinstance(data, dict) else data
+                result = [{'title': r.get('title') or '', 'url': r['url'],
+                           'snippet': r.get('snippet') or r.get('summary') or ''}
+                          for r in rows if isinstance(r, dict) and r.get('url')] or data
+                if isinstance(result, list):
+                    searched += [{'url': r['url'], 'title': r['title']} for r in result]
+            elif call.function.name == 'web_fetch' and args.get('url'):
+                result = _deepseek_tool(api_key, 'fetch', {'url': str(args['url'])[:8192]})
+                if 'error' not in result:
+                    fetched.append({'url': str(args['url']), 'title': result.get('title') or ''})
+            else:
+                result = {'error': f'unknown tool or missing argument: {call.function.name}'}
+            messages.append({'role': 'tool', 'tool_call_id': call.id,
+                             'content': json.dumps(result, ensure_ascii=False)[:DEEPSEEK_TOOL_RESULT_CHARS]})
+        if rnd == DEEPSEEK_MAX_ROUNDS - 1:
+            messages.append({'role': 'user', 'content': 'Stop searching now and give your final JSON answer.'})
+
+    raise AISearchError(msg('ai-unreadable'))
 
 
 # ---------------------------------------------------------------------------

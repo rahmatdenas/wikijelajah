@@ -9,7 +9,7 @@
    ========================================================================== */
 
 const AI_SETTINGS_KEY = 'wj-perkaya-ai';
-const PROVIDER_LABEL  = { claude: 'Claude', openai: 'OpenAI', gemini: 'Gemini', groq: 'Groq' };
+const PROVIDER_LABEL  = { claude: 'Claude', openai: 'OpenAI', gemini: 'Gemini', groq: 'Groq', openrouter: 'OpenRouter', grok: 'Grok', deepseek: 'DeepSeek' };
 
 // ---------------------------------------------------------------------------
 // PENGATURAN (API key hanya disimpan di browser ini)
@@ -60,6 +60,12 @@ function initSettings() {
   $('pk-settings-close').addEventListener('click', closeSettings);
   $('pk-settings-cancel').addEventListener('click', closeSettings);
   $('pk-set-provider').addEventListener('change', showProviderFields);
+  // Menu profil: buka pengaturan dari halaman mana pun, tanpa harus ke Perkaya Data
+  document.querySelectorAll('.js-open-ai-settings').forEach(b => b.addEventListener('click', () => {
+    $('top-nav-menu')?.classList.add('hidden');
+    $('top-nav-menu-toggle')?.setAttribute('aria-expanded', 'false');
+    openSettings();
+  }));
   $('pk-settings-save').addEventListener('click', () => {
     const s = { provider: $('pk-set-provider').value, keys: {}, models: {} };
     Object.keys(PROVIDER_LABEL).forEach(p => {
@@ -70,6 +76,7 @@ function initSettings() {
     });
     saveSettings(s);
     closeSettings();
+    showToast(msg('pk-settings-saved'));
     document.dispatchEvent(new CustomEvent('wj:ai-settings'));
     const next = _afterSettingsSaved;
     _afterSettingsSaved = null;
