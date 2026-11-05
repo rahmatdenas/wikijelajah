@@ -468,7 +468,7 @@ select option { color: var(--color-text); }
 .prop-add-btn:hover { background: var(--color-accent-bg); border-style: solid; }
 
 .prop-edit-inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); width: 100%; }
-.prop-edit-input { height: 32px; width: 140px; font-size: var(--text-sm); }
+.prop-edit-input { height: 32px; width: 139px; font-size: var(--text-sm); }
 .prop-edit-input--item { width: 100%; max-width: 220px; }
 .prop-edit-unit { color: var(--color-text-muted); font-size: var(--text-sm); }
 
