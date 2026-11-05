@@ -53,7 +53,7 @@
   cursor: pointer;
 }
 
-.form-select--sm, .form-input--sm { height: 34px; font-size: var(--text-sm); }
+.form-select--sm, .form-input--sm { height: 32px; font-size: var(--text-sm); }
 
 .form-select:hover,
 .form-input:hover { border-color: var(--color-gray-400); }
@@ -504,7 +504,8 @@ select option { color: var(--color-text); }
 .prop-unit-select { width: auto; min-width: 72px; height: 32px; }
 
 /* --- Tambah data lain (properti di luar skema kategori) --- */
-.add-prop { margin-top: var(--space-2); }
+.add-prop { margin-top: var(--space-2); background: #720f0f; padding: 10px; display: flex;}
+.add-prop .link-btn {color: white;}
 .add-prop-box { display: flex; align-items: flex-start; gap: var(--space-1); }
 .add-prop-field { flex: 1; display: block; }
 .add-prop-field .form-input { width: 100%; }
