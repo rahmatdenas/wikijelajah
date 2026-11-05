@@ -446,7 +446,9 @@ select option { color: var(--color-text); }
 
 .detail-data {
   list-style: none; margin: 0; padding: 0;
-  border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: visible;
+  border: 1px solid var(--color-border); 
+/* Radiusdihapus border-radius: var(--radius-md);   */
+   overflow: visible;
 }
 .detail-data-row {
   display: grid; grid-template-columns: 38% 1fr; gap: var(--space-3);
@@ -469,7 +471,7 @@ select option { color: var(--color-text); }
 
 .prop-edit-inline { display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); width: 100%; }
 .prop-edit-input { height: 32px; width: 139px; font-size: var(--text-sm); }
-.prop-edit-input--item { width: 100%; max-width: 220px; }
+.prop-edit-input--item { width: 139px; max-width: 220px; }
 .prop-edit-unit { color: var(--color-text-muted); font-size: var(--text-sm); }
 
 .prop-edit-field { position: relative; display: inline-block; }
@@ -504,8 +506,8 @@ select option { color: var(--color-text); }
 .prop-unit-select { width: auto; min-width: 72px; height: 32px; }
 
 /* --- Tambah data lain (properti di luar skema kategori) --- */
-.add-prop { margin-top: var(--space-2); background: #720f0f; padding: 10px; display: flex;}
-.add-prop .link-btn {color: white;}
+.add-prop .link-btn {width:100%; align-items: center;height: 42px; margin-top: -10px; color: white; /* margin-top: var(--space-2); */background: #720f0f;padding: 10px;display: flex;}
+.add-prop  {margin-top: var(--space-2);}
 .add-prop-box { display: flex; align-items: flex-start; gap: var(--space-1); }
 .add-prop-field { flex: 1; display: block; }
 .add-prop-field .form-input { width: 100%; }
