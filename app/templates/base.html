@@ -53,6 +53,11 @@
   <div class="lightbox-content">
     <img id="lightbox-img" src="" alt="" class="lightbox-img">
     <button class="lightbox-close" aria-label="{{ msg('button-close') }}">&times;</button>
+    {# Judul berkas (buka di Commons) + fotografer & lisensi, diisi main.js #}
+    <div class="lightbox-info">
+      <a id="lightbox-title" class="lightbox-title" href="#" target="_blank" rel="noopener" title="{{ msg('lightbox-open-commons') }}"></a>
+      <p id="lightbox-credit" class="lightbox-credit"></p>
+    </div>
   </div>
 </div>
 

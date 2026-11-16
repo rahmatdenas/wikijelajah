@@ -545,8 +545,8 @@ async function startSearch() {
         : msg('partial-coords-error', coordRes.error?.message || msg('unknown')));
     }
 
-    // ===== FASE 3: Media (background) =====
-    loadMediaBackground(allQids, signal, () => {
+    // ===== FASE 3: Media (background), sesuai urutan tampil: butir teratas dapat gambar lebih dulu =====
+    loadMediaBackground([...State.sortedIds], signal, () => {
       if (!State.partial) _saveCache(cacheKey, State.records, State.sortedIds);
     });
 
@@ -592,10 +592,11 @@ function resetHasilUI() {
   if (DOM.hasilList) DOM.hasilList.innerHTML = '';
   if (DOM.filterWilayah) DOM.filterWilayah.innerHTML = `<option value="all">${escHtml(msg('filter-all-regions'))}</option>`;
   if (DOM.filterUrut) DOM.filterUrut.innerHTML = `
-    <option value="tahun">${escHtml(msg('sort-year'))}</option>
     <option value="nama">${escHtml(msg('sort-name'))}</option>
     <option value="wilayah">${escHtml(msg('sort-region'))}</option>
+    <option value="tahun">${escHtml(msg('sort-year'))}</option>
   `;
+  $('filter-header')?.classList.add('hidden');
   if (DOM.searchInput) { DOM.searchInput.value = ''; DOM.searchInput.placeholder = msg('search-counting'); }
   DOM.btnArtikel?.classList.add('loading');
   DOM.btnGambar?.classList.add('loading');
@@ -678,15 +679,9 @@ function finishBuildResults() {
   if (DOM.filterWilayah)
     DOM.filterWilayah.innerHTML = `<option value="all">${escHtml(msg('filter-all-regions'))}</option>` + provOpts;
 
-  // Sort default: tahun → nama
-  State.sortedIds.sort((a, b) => {
-    const ya = State.records[a].year ?? 9999;
-    const yb = State.records[b].year ?? 9999;
-    if (ya !== yb) return ya - yb;
-    return (State.records[a].title || '').localeCompare(State.records[b].title || '');
-  });
-
-  applyFilter();
+  // Kotak cari & filter baru muncul setelah ada data yang bisa disaring
+  $('filter-header')?.classList.remove('hidden');
+  applySort(DOM.filterUrut?.value || 'nama');
 }
 
 function applyFilter() {
@@ -828,7 +823,8 @@ function applySort(key) {
       if (d) return d;
     }
     if (key === 'wilayah') {
-      const c = (ra.provLabel || '').localeCompare(rb.provLabel || '');
+      // Abjad lokasi spesifik (Aceh, Alor, Ambon, Anyer…), bukan provinsinya
+      const c = (ra.lokLabel || ra.provLabel || '').localeCompare(rb.lokLabel || rb.provLabel || '');
       if (c) return c;
     }
     return (ra.title || '').localeCompare(rb.title || '');
@@ -905,16 +901,6 @@ function renderDetail(qid) {
        </p>`
     : '';
 
-  const linkChip = (href, icon, label) =>
-    `<a href="${href}" target="_blank" rel="noopener" class="link-chip">
-       <img src="/static/img/${icon}" alt="" width="16" height="16"><span>${escHtml(label)}</span>${ICON_EXT}
-     </a>`;
-  const links = [
-    r.articleTitle && linkChip(`${WIKI_BASE}/wiki/${encodeURIComponent(r.articleTitle)}`, 'wikipedia_tiny_logo.png', msg('detail-read-wikipedia')),
-    linkChip(`https://www.wikidata.org/wiki/${escHtml(qid)}`, 'wikidata_tiny_logo.png', msg('detail-view-wikidata')),
-    r.commonsCat && linkChip(`https://commons.wikimedia.org/wiki/Category:${encodeURIComponent(r.commonsCat)}`, 'wikicommons_tiny_logo.png', msg('detail-gallery')),
-  ].filter(Boolean).join('');
-
   const counter = State.currentIndex >= 0 ? `${State.currentIndex + 1} / ${State.visibleIds.length}` : '';
 
   el.innerHTML = `
@@ -942,7 +928,7 @@ function renderDetail(qid) {
       </div>
       ${articleNote}
 
-      <div class="detail-links">${links}</div>
+      <div class="detail-links" id="detail-links-${escHtml(qid)}">${detailLinksHtml(qid)}</div>
 
       <section class="detail-section">
         <div class="detail-section-head">
@@ -989,6 +975,22 @@ function renderDetail(qid) {
   } else {
     mapShowShape(null);
   }
+}
+
+/** Tautan ke proyek Wikimedia; galeri Commons & WikiBuku baru ada setelah data detail dimuat. */
+function detailLinksHtml(qid) {
+  const r = State.records[qid];
+  const d = r._detail;
+  const linkChip = (href, icon, label) =>
+    `<a href="${escHtml(href)}" target="_blank" rel="noopener" class="link-chip">
+       <img src="/static/img/${icon}" alt="" width="16" height="16"><span>${escHtml(label)}</span>${ICON_EXT}
+     </a>`;
+  return [
+    r.articleTitle && linkChip(`${WIKI_BASE}/wiki/${encodeURIComponent(r.articleTitle)}`, 'wikipedia_tiny_logo.png', msg('detail-read-wikipedia')),
+    linkChip(`https://www.wikidata.org/wiki/${qid}`, 'wikidata_tiny_logo.png', msg('detail-view-wikidata')),
+    d?.commonsCat && linkChip(`https://commons.wikimedia.org/wiki/Category:${encodeURIComponent(d.commonsCat)}`, 'wikicommons_tiny_logo.png', msg('detail-gallery')),
+    d?.wikibooks && linkChip(d.wikibooks, 'wikibook_tiny_logo.png', msg('detail-view-wikibooks')),
+  ].filter(Boolean).join('');
 }
 
 // ---------------------------------------------------------------------------
@@ -1055,10 +1057,6 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
     </details>`;
   }
 
-  if (detail.wikibooks) {
-    html += `<div class="detail-links"><a href="${escHtml(detail.wikibooks)}" target="_blank" rel="noopener" class="link-chip"><img src="/static/img/wikibook_tiny_logo.png" alt="" width="16" height="16"><span>${escHtml(msg('detail-view-wikibooks'))}</span>${ICON_EXT}</a></div>`;
-  }
-
   return html;
 }
 
@@ -1118,6 +1116,8 @@ function renderDetailProps(qid) {
   const el = $(`detail-dynprops-${qid}`);
   if (!el || !r?._detail) return;
   el.innerHTML = renderDynPropsHtml(qid, r._detail, State.params?.klasterNama || '');
+  const links = $(`detail-links-${qid}`);
+  if (links) links.innerHTML = detailLinksHtml(qid);
   attachPropEditHandlers(qid, el);
   attachAddProperty(qid, el);
   el.querySelector('.detail-all')?.addEventListener('toggle', e => renderAllData(qid, e.currentTarget), { once: true });
@@ -1259,7 +1259,7 @@ async function renderAllData(qid, details) {
         : escHtml(v.text)).join(', ');
       const more = row.values.length > MAX ? ` <span class="prop-empty-badge">${escHtml(msg('detail-more-values', row.values.length - MAX))}</span>` : '';
       return `<li class="detail-data-row">
-        <a class="detail-info-key" href="https://www.wikidata.org/wiki/Property:${escHtml(row.pid)}" target="_blank" rel="noopener">${escHtml(ucFirst(row.label))}</a>
+        <span class="detail-info-key">${escHtml(ucFirst(row.label))}</span>
         <span class="detail-info-val">${vals}${more}</span>
       </li>`;
     }).join('')}</ul>`;
@@ -1623,6 +1623,24 @@ function openLightbox(filename) {
   const img     = $('lightbox-img');
   if (!overlay || !img) return;
   img.src = commonsFileUrl(filename, 1200);
+  img.dataset.file = filename;
+
+  const title = $('lightbox-title');
+  if (title) {
+    title.href = commonsFilePageUrl(filename);
+    title.innerHTML = `<span>${escHtml(filename.replace(/_/g, ' ').replace(/\.[^.]+$/, ''))}</span>${ICON_EXT}`;
+  }
+  const credit = $('lightbox-credit');
+  if (credit) {
+    credit.textContent = msg('loading');
+    // Fotografer & lisensi sebagai teks biasa (tanpa tautan); <template> agar HTML dari Commons tidak dijalankan
+    fetchImageCaption(filename, State.abortCtrl?.signal).then(html => {
+      if (img.dataset.file !== filename) return;  // lightbox sudah berganti foto
+      const tpl = document.createElement('template');
+      tpl.innerHTML = html || '';
+      credit.textContent = tpl.content.textContent.trim();
+    }).catch(() => { credit.textContent = ''; });
+  }
   overlay.classList.remove('hidden');
 }
 

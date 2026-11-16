@@ -123,8 +123,9 @@ padding: var(--space-5);
 .pk-search { width: 240px; height: 34px; }
 
 /* --- Matriks --- */
+/* Gulir di dalam kotak tabel (bukan halaman) agar judul kolom tetap terlihat saat tabel panjang */
 .pk-table-scroll {
-  overflow-x: auto; background: var(--color-surface);
+  overflow: auto; max-height: calc(100vh - 160px); background: var(--color-surface);
   border: 1px solid var(--color-border); border-radius: var(--radius-lg);
 }
 .pk-matrix { border-collapse: collapse; width: 100%; }
@@ -277,7 +278,7 @@ padding: var(--space-5);
   padding: var(--space-2) var(--space-3); text-align: left;
   border-bottom: 1px solid var(--color-gray-100); vertical-align: top; font-size: var(--text-sm);
 }
-.pk-history th { color: var(--color-gray-700); background: var(--color-gray-50); font-weight: 600; }
+.pk-history th { position: sticky; top: 0; z-index: 1; color: var(--color-gray-700); background: var(--color-gray-50); font-weight: 600; }
 .pk-history a { color: var(--color-primary); }
 .pk-status { font-weight: 700; }
 .pk-status--ok    { color: var(--color-success); }

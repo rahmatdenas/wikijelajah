@@ -225,6 +225,8 @@ function attachItemSuggest(input, list) {
   input.addEventListener('input', () => {
     delete input.dataset.qid;
     delete input.dataset.label;
+    input.classList.remove('is-picked');
+    input.removeAttribute('title');
     clearTimeout(timer);
     const term = input.value.trim();
     if (term.length < 2) { list.classList.add('hidden'); return; }
@@ -258,6 +260,8 @@ function attachItemSuggest(input, list) {
     input.value         = li.dataset.label;
     input.dataset.qid   = li.dataset.qid;
     input.dataset.label = li.dataset.label;
+    input.classList.add('is-picked');  // tanda ✓: butir sudah terpilih, bukan sekadar teks ketikan
+    input.title         = li.dataset.qid;
     list.classList.add('hidden');
   });
 

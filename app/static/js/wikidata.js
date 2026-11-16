@@ -149,7 +149,7 @@ const _T_COORDS_DIRECT = `SELECT ?siteQid ?coord WHERE {
   BIND(SUBSTR(STR(?site),32) AS ?siteQid)
 }`;
 
-const _T_MEDIA = `SELECT ?siteQid (SAMPLE(?img) AS ?image) (SAMPLE(?wikiTitle) AS ?wikipediaUrlTitle) (SAMPLE(?cat) AS ?commonsCat) WHERE {
+const _T_MEDIA = `SELECT ?siteQid (SAMPLE(?img) AS ?image) (SAMPLE(?wikiTitle) AS ?wikipediaUrlTitle) WHERE {
   VALUES ?site { <QIDS> }
   OPTIONAL {
     ?site p:P18 ?imgStmt .
@@ -161,7 +161,6 @@ const _T_MEDIA = `SELECT ?siteQid (SAMPLE(?img) AS ?image) (SAMPLE(?wikiTitle) A
     ?wiki schema:about ?site ; schema:isPartOf <${WIKI_BASE}/> .
     BIND(STRAFTER(STR(?wiki), "/wiki/") AS ?wikiTitle)
   }
-  OPTIONAL { ?site wdt:P373 ?cat . }
   BIND(SUBSTR(STR(?site),32) AS ?siteQid)
 } GROUP BY ?siteQid`;
 
@@ -493,7 +492,8 @@ async function fetchCoordinates(qids, klasterNama, propLokasi, signal, opts = {}
 // ---------------------------------------------------------------------------
 
 /**
- * Gambar, artikel Wikipedia, dan kategori Commons per butir; opsi sama dengan fetchCoordinates.
+ * Gambar dan artikel Wikipedia per butir; opsi sama dengan fetchCoordinates.
+ * Kategori Commons tidak di sini: baru dibutuhkan saat detail dibuka (fetchDetailProps).
  * @returns {Promise<{media: Object, complete: boolean, reason?: string, error?: Error}>}
  */
 async function fetchMedia(qids, signal, opts = {}) {
@@ -510,7 +510,6 @@ async function fetchMedia(qids, signal, opts = {}) {
       media[qid] = {
         imageFilename: r.image ? extractFilename(r.image.value) : null,
         articleTitle:  r.wikipediaUrlTitle ? decodeURIComponent(r.wikipediaUrlTitle.value) : null,
-        commonsCat: r.commonsCat ? r.commonsCat.value : null,
       };
     });
   }, signal, opts);
@@ -530,12 +529,10 @@ async function fetchSingleItemMedia(qid, signal) {
   if (!entity) throw new Error('Entity not found');
 
   const p18       = entity.claims?.P18;
-  const p373      = entity.claims?.P373;
   const wiki      = entity.sitelinks?.[`${WIKI_LANG}wiki`];
 
   return {
     imageFilename: p18?.[0]?.mainsnak?.datavalue?.value?.replace(/ /g, '_') ?? null,
-    commonsCat:    p373?.[0]?.mainsnak?.datavalue?.value ?? null,
     articleTitle:  wiki?.title ?? null,
   };
 }
@@ -998,6 +995,7 @@ async function fetchDetailProps(qid, klasterNama, signal) {
     tipe,
     values: formatAttrValues(claims, skema, labels),
     wikibooks: entity.sitelinks?.[`${WIKI_LANG}wikibooks`]?.url || null,
+    commonsCat: bestRankClaims(claims.P373)[0]?.mainsnak.datavalue?.value || null,
     claims,  // semua klaim mentah: untuk "Lihat semua data" & agar properti yang sudah ada tidak ditawarkan lagi
   };
 }
@@ -1117,7 +1115,7 @@ function formatAnySnak(snak, labels) {
   }
 }
 
-/** Semua properti butir beserta nilainya, urut nama properti. */
+/** Semua properti butir beserta nilainya, dalam urutan klaim dari Wikidata. */
 async function fetchAllClaimsView(claims, signal) {
   const ids = new Set(Object.keys(claims));
   Object.values(claims).forEach(list => bestRankClaims(list).forEach(c => {
@@ -1133,6 +1131,5 @@ async function fetchAllClaimsView(claims, signal) {
       pid, label: labels[pid] || pid,
       values: bestRankClaims(list).map(c => formatAnySnak(c.mainsnak, labels)).filter(v => v.text),
     }))
-    .filter(row => row.values.length)
-    .sort((a, b) => a.label.localeCompare(b.label));
+    .filter(row => row.values.length);
 }

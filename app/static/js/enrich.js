@@ -678,13 +678,16 @@ async function renderItemChoices(c) {
   try { results = await searchWikidataItems(c.value); } catch {}
   if (!list || !list.isConnected) return;  // kartu sudah berganti
 
-  list.innerHTML = results.length
+  // Butir yang dimaksud bisa belum ada di Wikidata: tawarkan membuatnya dengan label terisi
+  const newItemUrl = `https://www.wikidata.org/wiki/Special:NewItem?${new URLSearchParams({ label: c.value, lang: I18N.lang })}`;
+  list.innerHTML = (results.length
     ? results.slice(0, 5).map(it => `
         <li><button type="button" class="pk-item-choice" data-qid="${escHtml(it.id)}" data-label="${escHtml(it.label)}">
           <strong>${escHtml(it.label)}</strong> <span class="pk-choice-qid">${escHtml(it.id)}</span>
           ${it.description ? `<span class="pk-choice-desc">${escHtml(it.description)}</span>` : ''}
         </button></li>`).join('')
-    : `<li class="pk-hint">${escHtml(msg('pk-item-none'))}</li>`;
+    : `<li class="pk-hint">${escHtml(msg('pk-item-none'))}</li>`)
+    + `<li class="pk-hint"><a href="${escHtml(newItemUrl)}" target="_blank" rel="noopener">+ ${escHtml(msg('pk-item-create', c.value))}</a></li>`;
 
   list.addEventListener('click', e => {
     const btn = e.target.closest('.pk-item-choice');
@@ -692,6 +695,7 @@ async function renderItemChoices(c) {
     input.value = btn.dataset.label;
     input.dataset.qid = btn.dataset.qid;
     input.dataset.label = btn.dataset.label;
+    input.classList.add('is-picked');
     list.querySelectorAll('.pk-item-choice').forEach(b => b.classList.toggle('selected', b === btn));
   });
   // Mengetik manual membatalkan pilihan dari daftar ini
