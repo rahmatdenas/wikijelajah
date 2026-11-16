@@ -281,31 +281,84 @@ function buildItemsQuery(p) {
 // FETCH UTILITIES
 // ---------------------------------------------------------------------------
 
-async function sparqlPost(query, signal) {
-  const resp = await fetch(WD_SPARQL_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Accept': 'application/sparql-results+json',
-      'Api-User-Agent': 'WikiJelajah/2.0 (teknologi@wikimedia.or.id)',
-    },
-    body: 'format=json&query=' + encodeURIComponent(query),
-    signal,
-  });
-  if (!resp.ok) throw new Error(`SPARQL HTTP ${resp.status}`);
-  const data = await resp.json();
-  return data.results.bindings;
+// Batas waktu per permintaan SPARQL. WQS sendiri menghentikan query setelah 60 detik, jadi
+// data utama diberi sedikit lebih; koordinat & media (query VALUES kecil) cukup 40 detik.
+const WD_TIMEOUT_MAIN  = 70000;
+const WD_TIMEOUT_BATCH = 40000;
+// Batch koordinat/media yang berjalan bersamaan (WQS membatasi query bersamaan per IP)
+const WD_PARALLEL = 4;
+
+/** Galat SPARQL beserta jenisnya: 'timeout' | 'rate' | 'http' | 'network'. */
+class SparqlError extends Error {
+  constructor(kind, message, status = 0) {
+    super(message);
+    this.name = 'SparqlError';
+    this.kind = kind;
+    this.status = status;
+    this.retryAfter = 0;
+  }
 }
 
-async function sparqlWithRetry(query, signal, maxRetry = 3) {
+async function sparqlPost(query, signal, timeout = WD_TIMEOUT_MAIN) {
+  // Timer milik permintaan ini saja dan selalu dibersihkan di finally
+  const timeoutCtrl = new AbortController();
+  const timer = setTimeout(() => timeoutCtrl.abort(), timeout);
+  try {
+    const resp = await fetch(WD_SPARQL_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Accept': 'application/sparql-results+json',
+        'Api-User-Agent': 'WikiJelajah/2.0 (teknologi@wikimedia.or.id)',
+      },
+      body: 'format=json&query=' + encodeURIComponent(query),
+      signal: anySignal([signal, timeoutCtrl.signal]),
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      if (resp.status === 429) {
+        const err = new SparqlError('rate', msg('sparql-rate-limited'), 429);
+        err.retryAfter = parseInt(resp.headers.get('Retry-After'), 10) || 0;
+        throw err;
+      }
+      if (body.includes('TimeoutException')) throw new SparqlError('timeout', msg('sparql-timeout'), resp.status);
+      throw new SparqlError('http', `SPARQL HTTP ${resp.status}`, resp.status);
+    }
+    const data = await resp.json();
+    return data.results.bindings;
+  } catch (err) {
+    if (timeoutCtrl.signal.aborted && !signal?.aborted) throw new SparqlError('timeout', msg('sparql-timeout'));
+    if (err instanceof TypeError) throw new SparqlError('network', err.message);
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Jeda yang ikut batal bila signal dibatalkan. */
+function _sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const onAbort = () => { clearTimeout(t); reject(new DOMException('Aborted', 'AbortError')); };
+    const t = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Kirim query dengan percobaan ulang untuk galat sementara (429, 5xx, jaringan).
+ * Timeout tidak diulang: query yang sama hampir pasti timeout lagi.
+ */
+async function sparqlWithRetry(query, signal, { maxRetry = 3, timeout = WD_TIMEOUT_MAIN } = {}) {
   for (let i = 1; i <= maxRetry; i++) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     try {
-      return await sparqlPost(query, signal);
+      return await sparqlPost(query, signal, timeout);
     } catch (err) {
       if (err.name === 'AbortError') throw err;
-      if (i === maxRetry) throw err;
-      await new Promise(r => setTimeout(r, 1500 * i));
+      const retryable = err.kind === 'rate' || err.kind === 'network' || (err.kind === 'http' && err.status >= 500);
+      if (!retryable || i === maxRetry) throw err;
+      const wait = err.kind === 'rate' ? Math.min(err.retryAfter * 1000 || 5000 * i, 60000) : 1500 * i;
+      await _sleep(wait, signal);
     }
   }
 }
@@ -316,9 +369,47 @@ function anySignal(signals) {
   if (AbortSignal.any) return AbortSignal.any(list);
   const ctrl = new AbortController();
   list.forEach(s => s.aborted
-    ? ctrl.abort()
-    : s.addEventListener('abort', () => ctrl.abort(), { once: true }));
+    ? ctrl.abort(s.reason)
+    : s.addEventListener('abort', () => ctrl.abort(s.reason), { once: true }));
   return ctrl.signal;
+}
+
+/**
+ * Jalankan worker untuk setiap batch, paling banyak WD_PARALLEL sekaligus.
+ * Batch yang gagal dilewati agar hasil batch lain tetap terpakai.
+ * @param {Array}       chunks
+ * @param {Function}    worker - (chunk, signal) => Promise; menulis hasilnya sendiri setelah respons utuh
+ * @param {AbortSignal} signal - batal total: melempar AbortError
+ * @param {Object}      [opts]
+ * @param {AbortSignal} [opts.stopSignal] - "Hentikan": berhenti, pertahankan batch yang sudah selesai
+ * @param {Function}    [opts.onProgress] - persen batch yang selesai (0–100)
+ * @returns {Promise<{complete: boolean, reason?: 'stopped'|'error', error?: Error}>}
+ */
+async function runBatches(chunks, worker, signal, { stopSignal = null, onProgress = null } = {}) {
+  const reqSignal = stopSignal ? anySignal([signal, stopSignal]) : signal;
+  let next = 0, done = 0, failed = 0, lastError = null;
+  onProgress?.(0);
+
+  const lane = async () => {
+    while (next < chunks.length && !reqSignal?.aborted) {
+      const chunk = chunks[next++];
+      try {
+        await worker(chunk, reqSignal);
+      } catch (err) {
+        if (err.name === 'AbortError') return;
+        failed++;
+        lastError = err;
+      }
+      done++;
+      onProgress?.(Math.round((done / chunks.length) * 100));
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(WD_PARALLEL, chunks.length) }, lane));
+
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  if (done < chunks.length) return { complete: false, reason: 'stopped' };
+  if (failed) return { complete: false, reason: 'error', error: lastError };
+  return { complete: true };
 }
 
 /**
@@ -369,52 +460,48 @@ async function fetchAllPages(queryFn, signal, onRow, onPage, opts = {}) {
 // KOORDINAT (batch parallel)
 // ---------------------------------------------------------------------------
 
-async function fetchCoordinates(qids, klasterNama, propLokasi, signal, onProgress) {
+/**
+ * Koordinat per butir. Batch yang sudah selesai tetap dipakai bila dihentikan atau sebagian gagal.
+ * @returns {Promise<{coords: Object, complete: boolean, reason?: string, error?: Error}>}
+ */
+async function fetchCoordinates(qids, klasterNama, propLokasi, signal, opts = {}) {
   const useLokasi = KLASTER_TANPA_KOORDINAT_LANGSUNG.has(klasterNama);
-
-  const chunks = chunkArray(qids, WD_COORD_BATCH);
   const coords = {};
-  let done = 0;
 
-  const PARALLEL = 4;
-  for (let i = 0; i < chunks.length; i += PARALLEL) {
-    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  const status = await runBatches(chunkArray(qids, WD_COORD_BATCH), async (chunk, reqSignal) => {
+    let q;
+    if (useLokasi) {
+      const klausaKoordinat = `?site wdt:${propLokasi} ?p131 . FILTER(?p131 != wd:Q252) ?p131 p:P625 ?coordStatement .`;
+      q = _T_COORDS
+        .replace('<QIDS>', chunk.join(' '))
+        .replace('<KLAUSA_KOORDINAT>', klausaKoordinat);
+    } else {
+      q = _T_COORDS_DIRECT.replace('<QIDS>', chunk.join(' '));
+    }
+    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH });
+    rows.forEach(r => {
+      const bits = r.coord.value.split(/[() ]/);
+      coords[r.siteQid.value] = { lon: parseFloat(bits[1]), lat: parseFloat(bits[2]) };
+    });
+  }, signal, opts);
 
-    await Promise.all(chunks.slice(i, i + PARALLEL).map(async chunk => {
-      let q;
-      if (useLokasi) {
-        const klausaKoordinat = `?site wdt:${propLokasi} ?p131 . FILTER(?p131 != wd:Q252) ?p131 p:P625 ?coordStatement .`;
-        q = _T_COORDS
-          .replace('<QIDS>', chunk.join(' '))
-          .replace('<KLAUSA_KOORDINAT>', klausaKoordinat);
-      } else {
-        q = _T_COORDS_DIRECT.replace('<QIDS>', chunk.join(' '));
-      }
-      const rows = await sparqlWithRetry(q, signal);
-      rows.forEach(r => {
-        const bits = r.coord.value.split(/[() ]/);
-        coords[r.siteQid.value] = { lon: parseFloat(bits[1]), lat: parseFloat(bits[2]) };
-      });
-    }));
-
-    done += Math.min(PARALLEL, chunks.length - i);
-    onProgress?.(Math.round((done / chunks.length) * 100));
-  }
-
-  return coords;
+  return { coords, ...status };
 }
 
 // ---------------------------------------------------------------------------
 // MEDIA: gambar + artikel Wikipedia (batch parallel, toleran gagal)
 // ---------------------------------------------------------------------------
 
-async function fetchMedia(qids, signal) {
-  const chunks = chunkArray(qids, WD_MEDIA_BATCH);
+/**
+ * Gambar, artikel Wikipedia, dan kategori Commons per butir; opsi sama dengan fetchCoordinates.
+ * @returns {Promise<{media: Object, complete: boolean, reason?: string, error?: Error}>}
+ */
+async function fetchMedia(qids, signal, opts = {}) {
   const media = {};
 
-  await Promise.allSettled(chunks.map(async chunk => {
+  const status = await runBatches(chunkArray(qids, WD_MEDIA_BATCH), async (chunk, reqSignal) => {
     const q = _T_MEDIA.replace('<QIDS>', chunk.join(' '));
-    const rows = await sparqlWithRetry(q, signal);
+    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH });
     rows.forEach(r => {
       const qid = r.siteQid.value.includes('entity/')
         ? r.siteQid.value.split('entity/')[1]
@@ -426,9 +513,9 @@ async function fetchMedia(qids, signal) {
         commonsCat: r.commonsCat ? r.commonsCat.value : null,
       };
     });
-  }));
+  }, signal, opts);
 
-  return media;
+  return { media, ...status };
 }
 
 // ---------------------------------------------------------------------------
@@ -549,6 +636,12 @@ function extractFilename(url) {
 }
 
 /** Tanggal Wikidata (+YYYY-MM-DD…) sesuai presisinya, dalam bahasa antarmuka. */
+/** Tahun (angka, negatif = SM) dari nilai waktu Wikidata; untuk pengurutan, bukan tampilan. */
+function yearOf(dateStr) {
+  const year = parseInt(dateStr, 10);  // '+1920-01-01T…' → 1920, '-0500-…' → -500
+  return Number.isNaN(year) ? null : year;
+}
+
 function formatDate(dateStr, precision) {
   if (!dateStr) return null;
   const clean = dateStr.replace(/^[+-]/, '');

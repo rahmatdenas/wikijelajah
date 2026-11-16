@@ -291,7 +291,7 @@ select option { color: var(--color-text); }
 .hasil-partial-note {
   margin: 0 var(--space-8) var(--space-2); padding: var(--space-2) var(--space-3);
   border-left: 3px solid #c68a00; background: var(--color-warning-bg); color: var(--color-warning);
-  font-size: var(--text-sm); border-radius: var(--radius-sm);
+  font-size: var(--text-sm); border-radius: var(--radius-sm); white-space: pre-line;
 }
 
 /* --- Jembatan ke Perkaya Data --- */

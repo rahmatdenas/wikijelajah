@@ -9,7 +9,7 @@
 // STATE TERPUSAT
 // ---------------------------------------------------------------------------
 const State = {
-  records:      {},      // QID → { id, title, provQid, provLabel, lokLabel, yearStr, lat, lon, ... }
+  records:      {},      // QID → { id, title, provQid, provLabel, lokLabel, yearStr, year, lat, lon, ... }
   sortedIds:    [],      // urutan saat ini
   visibleIds:   [],      // setelah filter
   currentIndex: -1,      // index di visibleIds untuk detail
@@ -19,6 +19,7 @@ const State = {
   mediaLoaded: false,
   abortCtrl:   null,
   stopCtrl:    null,      // "Cukupkan pencarian": hentikan penarikan, tampilkan yang sudah ada
+  stepCtrl:    null,      // "Hentikan" di bar status: hentikan langkah latar (koordinat / media) yang berjalan
   partial:     false,     // hasil tidak lengkap → jangan disimpan ke cache sesi
 };
 
@@ -345,7 +346,7 @@ const _CACHE_TTL = 30 * 60 * 1000;
 
 function _cacheKey(p) {
   // Bahasa ikut kunci: label & judul artikel Wikipedia berbeda per bahasa
-  return `wj3:${I18N.lang}:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
+  return `wj4:${I18N.lang}:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
 }
 
 function _loadCache(key) {
@@ -493,7 +494,7 @@ async function startSearch() {
           id: qid, title,
           lokQid: lQid, lokLabel: row.lLabel?.value || '',
           provQid: pQid, provLabel: row.pLabel?.value || '',
-          yearStr,
+          yearStr, year: yearOf(row.tM?.value),
         };
         State.sortedIds.push(qid);
       } else if (pQid && !State.records[qid].provQid) {
@@ -525,17 +526,24 @@ async function startSearch() {
     finishBuildResults();
     setLoadingStatus(null);
 
-    // ===== FASE 2: Koordinat =====
+    // ===== FASE 2: Koordinat (bisa dihentikan; batch yang sudah masuk tetap dipakai) =====
     const allQidsWd = allQids.map(q => `wd:${q}`);
-    setLoadingStatus(msg('loading-coordinates', klasterLabel));
-    const coords = await fetchCoordinates(allQidsWd, klasterNama, propLokasi, signal, null);
-    if (signal.aborted) return;
-    Object.entries(coords).forEach(([q, c]) => {
+    const coordRes = await fetchCoordinates(allQidsWd, klasterNama, propLokasi, signal, {
+      stopSignal: startStep(),
+      onProgress: pct => setLoadingStatus(msg('loading-coordinates', klasterLabel, pct)),
+    });
+    Object.entries(coordRes.coords).forEach(([q, c]) => {
       if (State.records[q]) { State.records[q].lat = c.lat; State.records[q].lon = c.lon; }
     });
     const markers = Object.values(State.records).map(r => mapBuildMarker(r)).filter(Boolean);
     if (markers.length) { mapAddMarkers(markers); mapFitAll(); }
     setLoadingStatus(null);
+    if (!coordRes.complete) {
+      State.partial = true;
+      addNote(coordRes.reason === 'stopped'
+        ? msg('partial-coords-stopped')
+        : msg('partial-coords-error', coordRes.error?.message || msg('unknown')));
+    }
 
     // ===== FASE 3: Media (background) =====
     loadMediaBackground(allQids, signal, () => {
@@ -545,24 +553,39 @@ async function startSearch() {
   } catch (err) {
     if (err.name === 'AbortError') return;
     console.error('Search error:', err);
-    setLoadingStatus(msg('search-error', err.message || msg('try-again')));
+    // Galat ditampilkan sebagai catatan, bukan di bar status yang berspinner
+    setLoadingStatus(null);
+    addNote(msg('search-error', err.message || msg('try-again')));
   }
+}
+
+/** Mulai langkah latar baru; tombol "Hentikan" di bar status menghentikan langkah ini saja. */
+function startStep() {
+  State.stepCtrl = new AbortController();
+  return State.stepCtrl.signal;
+}
+
+/** Tambah satu baris ke catatan kuning di atas hasil (hasil sebagian / galat). */
+function addNote(text) {
+  const note = $('hasil-partial-note');
+  if (!note) return;
+  note.textContent = note.textContent ? `${note.textContent}\n${text}` : text;
+  note.classList.remove('hidden');
 }
 
 /** Beri tahu bahwa hasil hanya sebagian, beserta alasannya. */
 function showPartialNote(fetched, count) {
-  const note = $('hasil-partial-note');
-  if (!note) return;
-  note.textContent = fetched.reason === 'stopped'
+  addNote(fetched.reason === 'stopped'
     ? (count ? msg('partial-stopped', count) : msg('partial-stopped-empty'))
-    : msg('partial-error', fetched.error?.message || msg('unknown'), count);
-  note.classList.remove('hidden');
+    : msg('partial-error', fetched.error?.message || msg('unknown'), count));
 }
 
 function resetHasilUI() {
   _listBuilt = false;
   $('hasil-empty')?.classList.add('hidden');
-  $('hasil-partial-note')?.classList.add('hidden');
+  const note = $('hasil-partial-note');
+  if (note) { note.textContent = ''; note.classList.add('hidden'); }
+  setLoadingStatus(null);
   $('cukupkan-wrap')?.classList.add('hidden');
   const btnCukup = $('btn-cukupkan');
   if (btnCukup) { btnCukup.disabled = false; btnCukup.textContent = msg('stop-search'); }
@@ -602,8 +625,11 @@ function setMediaReady() {
 
 async function loadMediaBackground(qids, signal, onComplete) {
   try {
-    const media = await fetchMedia(qids.map(q => `wd:${q}`), signal);
-    Object.entries(media).forEach(([qid, m]) => {
+    const res = await fetchMedia(qids.map(q => `wd:${q}`), signal, {
+      stopSignal: startStep(),
+      onProgress: pct => setLoadingStatus(msg('loading-media', pct)),
+    });
+    Object.entries(res.media).forEach(([qid, m]) => {
       const r = State.records[qid];
       if (!r) return;
       Object.assign(r, m);
@@ -611,9 +637,20 @@ async function loadMediaBackground(qids, signal, onComplete) {
     });
     refreshListThumbs();
     setMediaReady();
-    onComplete?.();
+    setLoadingStatus(null);
+    if (res.complete) {
+      onComplete?.();
+    } else {
+      State.partial = true;
+      addNote(res.reason === 'stopped'
+        ? msg('partial-media-stopped')
+        : msg('partial-media-error', res.error?.message || msg('unknown')));
+    }
   } catch (e) {
-    if (e.name !== 'AbortError') console.warn('Media load failed:', e);
+    // AbortError = pencarian sudah diganti: jangan sentuh tampilan atau cache pencarian baru
+    if (e.name === 'AbortError') return;
+    console.warn('Media load failed:', e);
+    setLoadingStatus(null);
   }
 }
 
@@ -643,8 +680,8 @@ function finishBuildResults() {
 
   // Sort default: tahun → nama
   State.sortedIds.sort((a, b) => {
-    const ya = parseInt(State.records[a].yearStr) || 9999;
-    const yb = parseInt(State.records[b].yearStr) || 9999;
+    const ya = State.records[a].year ?? 9999;
+    const yb = State.records[b].year ?? 9999;
     if (ya !== yb) return ya - yb;
     return (State.records[a].title || '').localeCompare(State.records[b].title || '');
   });
@@ -787,7 +824,7 @@ function applySort(key) {
   State.sortedIds.sort((a, b) => {
     const ra = State.records[a], rb = State.records[b];
     if (key === 'tahun') {
-      const d = (parseInt(ra.yearStr) || 9999) - (parseInt(rb.yearStr) || 9999);
+      const d = (ra.year ?? 9999) - (rb.year ?? 9999);
       if (d) return d;
     }
     if (key === 'wilayah') {
@@ -1753,11 +1790,8 @@ document.addEventListener('DOMContentLoaded', () => {
     State.stopCtrl?.abort();
   });
 
-  // Batalkan (tombol di dalam panel-hasil)
-  $('btn-batalkan')?.addEventListener('click', () => {
-    State.abortCtrl?.abort();
-    showSection('landing');
-  });
+  // Hentikan (bar status): hentikan langkah latar yang berjalan, data yang sudah masuk tetap dipakai
+  $('btn-batalkan')?.addEventListener('click', () => State.stepCtrl?.abort());
 
   // Filter hasil
   DOM.filterWilayah?.addEventListener('change', e => {
