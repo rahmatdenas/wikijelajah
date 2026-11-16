@@ -117,8 +117,6 @@
 
     <header class="results-head">
       <button type="button" id="btn-ubah-pencarian" class="back-link">← {{ msg('results-edit-search') }}</button>
-      <h2 id="results-title" class="results-title"></h2>
-      <p id="results-count" class="results-count"></p>
     </header>
 
     {# Status bar loading — disembunyikan setelah selesai #}
@@ -168,7 +166,8 @@
         <p>{{ msg('results-none-hint') }}</p>
       </div>
       <ol id="hasil-list" class="result-list"></ol>
-      <nav id="hasil-pager" class="pager hidden" aria-label="{{ msg('results-pages') }}"></nav>
+      {# Penanda bawah daftar: butir berikutnya dimuat saat ini terlihat (main.js: appendItems) #}
+      <p id="hasil-end" class="hasil-end hidden" aria-live="polite"></p>
     </div>
   </section>
 

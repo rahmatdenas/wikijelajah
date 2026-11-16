@@ -135,7 +135,7 @@ WHERE {
   SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
 }`;
 
-const _T_COORDS = `SELECT DISTINCT ?siteQid ?coord WHERE {
+const _T_COORDS = `SELECT DISTINCT ?siteQid ?p131 ?coord WHERE {
   VALUES ?site { <QIDS> }
   <KLAUSA_KOORDINAT>
   ?coordStatement ps:P625 ?coord .
@@ -461,11 +461,13 @@ async function fetchAllPages(queryFn, signal, onRow, onPage, opts = {}) {
 
 /**
  * Koordinat per butir. Batch yang sudah selesai tetap dipakai bila dihentikan atau sebagian gagal.
+ * Klaster via lokasi: koordinat hanya dipakai bila butir punya tepat satu lokasi.
  * @returns {Promise<{coords: Object, complete: boolean, reason?: string, error?: Error}>}
  */
 async function fetchCoordinates(qids, klasterNama, propLokasi, signal, opts = {}) {
   const useLokasi = KLASTER_TANPA_KOORDINAT_LANGSUNG.has(klasterNama);
   const coords = {};
+  const lokasiCount = {};  // QID → jumlah lokasi berbeda (klaster via lokasi)
 
   const status = await runBatches(chunkArray(qids, WD_COORD_BATCH), async (chunk, reqSignal) => {
     let q;
@@ -478,11 +480,19 @@ async function fetchCoordinates(qids, klasterNama, propLokasi, signal, opts = {}
       q = _T_COORDS_DIRECT.replace('<QIDS>', chunk.join(' '));
     }
     const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH });
+    const lokasi = {};
     rows.forEach(r => {
+      const qid = r.siteQid.value;
+      if (r.p131) (lokasi[qid] ||= new Set()).add(r.p131.value);
       const bits = r.coord.value.split(/[() ]/);
-      coords[r.siteQid.value] = { lon: parseFloat(bits[1]), lat: parseFloat(bits[2]) };
+      coords[qid] ??= { lon: parseFloat(bits[1]), lat: parseFloat(bits[2]) };
     });
+    Object.entries(lokasi).forEach(([qid, set]) => { lokasiCount[qid] = set.size; });
   }, signal, opts);
+
+  // Butir dengan beberapa lokasi (mis. songket di banyak provinsi) tidak diberi titik:
+  // satu titik di salah satu lokasi akan menyesatkan. Wilayahnya tetap lengkap di filter.
+  Object.entries(lokasiCount).forEach(([qid, n]) => { if (n > 1) delete coords[qid]; });
 
   return { coords, ...status };
 }

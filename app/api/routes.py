@@ -167,6 +167,23 @@ def update_description(qid):
 # datatype: item | quantity | time | url | string
 # ---------------------------------------------------------------------------
 
+# Properti yang boleh diberi nilai tambahan walau sudah terisi (sama dengan PROP_MULTI_VALUE di main.js):
+# terbuat dari, teknik pembuatan, bagian dari, status warisan budaya
+MULTI_VALUE_PROPS = {'P186', 'P2079', 'P361', 'P1435'}
+
+
+def _has_same_value(claims, new_value):
+    """Apakah salah satu klaim sudah bernilai sama? Nilai lama boleh punya kunci tambahan (mis. 'id')."""
+    for claim in claims:
+        old = claim.get('mainsnak', {}).get('datavalue', {}).get('value')
+        if isinstance(new_value, dict) and isinstance(old, dict):
+            if all(old.get(k) == v for k, v in new_value.items()):
+                return True
+        elif old == new_value:
+            return True
+    return False
+
+
 @api.route('/item/<qid>/add-claim', methods=['POST'])
 @login_required
 def add_claim(qid):
@@ -189,7 +206,8 @@ def add_claim(qid):
     ua   = _ua()
     http = _get_session()
 
-    # Jangan menambah nilai kedua bila properti ini sudah terisi (mis. diisi orang lain sementara itu)
+    # Jangan menambah nilai kedua bila properti ini sudah terisi (mis. diisi orang lain sementara itu),
+    # kecuali properti yang memang boleh punya beberapa nilai — tapi jangan nilai yang sama persis
     try:
         ent = http.get(wikidata_api, params={
             'action': 'wbgetentities', 'ids': qid, 'props': 'claims', 'format': 'json',
@@ -197,8 +215,10 @@ def add_claim(qid):
         existing = ent.get('entities', {}).get(qid, {}).get('claims', {}).get(prop)
     except Exception:
         return jsonify({'error': msg('api-check-failed')}), 502
-    if existing:
+    if existing and prop not in MULTI_VALUE_PROPS:
         return jsonify({'error': msg('api-already-has-value', prop, qid)}), 409
+    if existing and _has_same_value(existing, json.loads(wd_value)):
+        return jsonify({'error': msg('api-already-has-same-value', prop, qid)}), 409
 
     try:
         csrf = _get_csrf_token(http, wikidata_api)

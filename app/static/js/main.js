@@ -9,12 +9,13 @@
 // STATE TERPUSAT
 // ---------------------------------------------------------------------------
 const State = {
-  records:      {},      // QID → { id, title, provQid, provLabel, lokLabel, yearStr, year, lat, lon, ... }
+  records:      {},      // QID → { id, title, provQid(s), provLabel(s), lokLabel, yearStr, year, lat, lon, ... }
   sortedIds:    [],      // urutan saat ini
   visibleIds:   [],      // setelah filter
   currentIndex: -1,      // index di visibleIds untuk detail
-  filter: { wilayah: 'all', mediaOnly: null, search: '' },
-  viewMode:    'list',
+  // image/article: null (tidak disaring) | 'has' (ada) | 'without' (tanpa)
+  filter: { wilayah: 'all', search: '', image: null, article: null },
+  shown:       0,       // jumlah butir visibleIds yang sudah dirender (dimuat bertahap saat digulir)
   params:      null,
   mediaLoaded: false,
   abortCtrl:   null,
@@ -93,8 +94,6 @@ function showSection(name) {
     el?.classList.toggle('hidden', k !== name)
   );
   _activeSection = name;
-  // Sebelumnya/Selanjutnya di detail bisa melewati batas halaman: render ulang halaman yang sesuai
-  if (name === 'hasil' && _listBuilt && State.renderedPage !== State.page) renderList();
 
   // Di beranda: tawarkan kembali ke hasil terakhir bila ada
   const last = $('btn-hasil-terakhir');
@@ -346,7 +345,7 @@ const _CACHE_TTL = 30 * 60 * 1000;
 
 function _cacheKey(p) {
   // Bahasa ikut kunci: label & judul artikel Wikipedia berbeda per bahasa
-  return `wj4:${I18N.lang}:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
+  return `wj5:${I18N.lang}:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
 }
 
 function _loadCache(key) {
@@ -417,7 +416,7 @@ async function startSearch() {
     : 'Indonesia';
 
   const params = {
-    jenis, klasterNama, klasterLabel, klasterSlug, propLokasi, propTahun, useSubclass,
+    jenis, klasterNama, klasterLabel, klasterSlug, propLokasi, propTahun, useSubclass, wilayahNama,
     wilayah:   tipe === 'provinsi' ? 'provinsi' : tipe,
     // Q-ID wilayah bebas memakai jalur query yang sama dengan provinsi
     provQid:   tipe === 'provinsi' ? provQid : tipe === 'qid' ? wilayahQid : '',
@@ -440,8 +439,6 @@ async function startSearch() {
     enrichLink.classList.toggle('hidden', !bisa);
     if (bisa) enrichLink.href = contextUrl(enrichLink.pathname, ctx);
   }
-  $('results-title').textContent = msg('results-title', klasterLabel, wilayahNama);
-  $('results-count').textContent = '';
 
   // Reset state
   State.records    = {};
@@ -485,21 +482,26 @@ async function startSearch() {
       const qid = row.SQ?.value;
       if (!qid) return;
       const pQid    = row.PQ?.value || null;
+      const pLabel  = row.pLabel?.value || '';
       const lQid    = row.LQ?.value || null;
       const title   = row.sLabel?.value || qid;
       const yearStr = formatDate(row.tM?.value, row.tP?.value);
 
-      if (!State.records[qid]) {
-        State.records[qid] = {
+      let rec = State.records[qid];
+      if (!rec) {
+        rec = State.records[qid] = {
           id: qid, title,
           lokQid: lQid, lokLabel: row.lLabel?.value || '',
-          provQid: pQid, provLabel: row.pLabel?.value || '',
+          provQid: null, provLabel: '',   // provinsi pertama (untuk teks ringkas)
+          provQids: [], provLabels: [],   // semua provinsi: butir berlokasi banyak muncul di setiap filternya
           yearStr, year: yearOf(row.tM?.value),
         };
         State.sortedIds.push(qid);
-      } else if (pQid && !State.records[qid].provQid) {
-        State.records[qid].provQid   = pQid;
-        State.records[qid].provLabel = row.pLabel?.value || '';
+      }
+      if (pQid && !rec.provQids.includes(pQid)) {
+        rec.provQids.push(pQid);
+        rec.provLabels.push(pLabel);
+        if (!rec.provQid) { rec.provQid = pQid; rec.provLabel = pLabel; }
       }
     }, total => {
       setLoadingStatus(msg('loading-category-count', klasterLabel, wilayahNama, total));
@@ -518,7 +520,6 @@ async function startSearch() {
       setLoadingStatus(null);
       DOM.searchInput && (DOM.searchInput.placeholder = msg('results-none'));
       $('hasil-empty')?.classList.remove('hidden');
-      $('results-count').textContent = msg('results-none');
       return;
     }
 
@@ -600,28 +601,48 @@ function resetHasilUI() {
   if (DOM.searchInput) { DOM.searchInput.value = ''; DOM.searchInput.placeholder = msg('search-counting'); }
   DOM.btnArtikel?.classList.add('loading');
   DOM.btnGambar?.classList.add('loading');
-  DOM.btnSemua?.classList.remove('loading');
-  setFilterButton('all');
-  State.viewMode = 'list';
-  State.filter = { wilayah: 'all', mediaOnly: null, search: '' };
+  State.filter = { wilayah: 'all', search: '', image: null, article: null };
+  updateFilterButtons();
 }
 
-/** Tandai tombol filter (Semua / Ada artikel / Ada foto) yang aktif. */
-function setFilterButton(filter) {
-  [DOM.btnSemua, DOM.btnArtikel, DOM.btnGambar].forEach(btn => {
+/** Ada saringan apa pun (wilayah, kata cari, gambar, artikel)? Bila tidak, tombol Semua aktif. */
+function hasFilter() {
+  const f = State.filter;
+  return f.wilayah !== 'all' || !!f.search || !!f.image || !!f.article;
+}
+
+/** Siklus tombol Gambar/Artikel: lepas → Ada → Tanpa → lepas. */
+const nextMediaFilter = state => state === null ? 'has' : state === 'has' ? 'without' : null;
+
+/** Label, jumlah, dan status aktif tombol Semua / Artikel / Foto. Jumlah media = spinner selama dimuat. */
+function updateFilterButtons() {
+  const f   = State.filter;
+  const all = State.sortedIds.map(id => State.records[id]);
+  const setLabel = (btn, text, count, on) => {
     if (!btn) return;
-    const on = btn.dataset.filter === filter;
+    const badge = count === null
+      ? '<span class="loader feature-btn-loader" aria-hidden="true"></span>'
+      : `<span class="feature-btn-count">${escHtml(formatNumber(count))}</span>`;
+    btn.innerHTML = `<span>${escHtml(text)}</span>${badge}`;
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-pressed', String(on));
-  });
+  };
+  const media = (btn, state, field, hasKey, withoutKey) => {
+    // Jumlah tidak terpengaruh saringan lain agar angkanya tetap
+    const n = State.mediaLoaded ? all.filter(r => !!r[field] === (state !== 'without')).length : null;
+    setLabel(btn, msg(state === 'without' ? withoutKey : hasKey), n, !!state);
+  };
+  setLabel(DOM.btnSemua, msg('filter-all'), all.length, !hasFilter());
+  media(DOM.btnArtikel, f.article, 'articleTitle', 'filter-has-article', 'filter-no-article');
+  media(DOM.btnGambar,  f.image,   'imageFilename', 'filter-has-photo',  'filter-no-photo');
 }
 
-// Data gambar/artikel tersedia → aktifkan tombol Jelajahi Artikel/Gambar
+// Data gambar/artikel tersedia → aktifkan tombol Artikel/Foto beserta jumlahnya
 function setMediaReady() {
   State.mediaLoaded = true;
   DOM.btnArtikel?.classList.remove('loading');
   DOM.btnGambar?.classList.remove('loading');
-  DOM.btnSemua?.classList.remove('loading');
+  updateFilterButtons();
 }
 
 async function loadMediaBackground(qids, signal, onComplete) {
@@ -658,19 +679,20 @@ async function loadMediaBackground(qids, signal, onComplete) {
 // ---------------------------------------------------------------------------
 // BUILD & RENDER RESULTS
 // ---------------------------------------------------------------------------
-// Hasil ditampilkan per halaman agar daftar ribuan butir tetap ringan & mudah ditelusuri
-const PAGE_SIZE = 50;
+// Hasil dimuat bertahap saat digulir agar daftar ribuan butir tetap ringan
+const LOAD_STEP = 40;
+let _listObserver = null;  // mengamati penanda di bawah daftar (#hasil-end)
 
 /** Dipanggil setelah FASE 1 selesai — sort + render list + isi filter wilayah */
 function finishBuildResults() {
   _listBuilt = true;
   const allIds = State.sortedIds; // sudah diisi saat row masuk
 
-  // Populasi filter wilayah
+  // Populasi filter wilayah (semua provinsi tiap butir)
   const provMap = {};
   allIds.forEach(q => {
     const r = State.records[q];
-    if (r.provQid && r.provLabel) provMap[r.provQid] = r.provLabel;
+    r.provQids.forEach((p, i) => { if (r.provLabels[i]) provMap[p] = r.provLabels[i]; });
   });
   const provOpts = Object.entries(provMap)
     .sort((a, b) => a[1].localeCompare(b[1]))
@@ -685,62 +707,66 @@ function finishBuildResults() {
 }
 
 function applyFilter() {
-  const { wilayah, mediaOnly, search } = State.filter;
+  const { wilayah, image, article, search } = State.filter;
   const q = search.toLowerCase();
 
   State.visibleIds = State.sortedIds.filter(id => {
     const r = State.records[id];
-    if (wilayah !== 'all' && r.provQid !== wilayah) return false;
-    if (mediaOnly === 'image'   && !r.imageFilename) return false;
-    if (mediaOnly === 'article' && !r.articleTitle)  return false;
-    if (q && !r.title.toLowerCase().includes(q) &&
-        !r.lokLabel?.toLowerCase().includes(q)  &&
-        !r.provLabel?.toLowerCase().includes(q)) return false;
+    if (wilayah !== 'all' && !r.provQids.includes(wilayah)) return false;
+    if (image   && !!r.imageFilename !== (image === 'has'))   return false;
+    if (article && !!r.articleTitle  !== (article === 'has')) return false;
+    if (q && ![r.title, r.lokLabel, ...r.provLabels].some(t => t?.toLowerCase().includes(q))) return false;
     return true;
   });
 
-  State.page = 0;
   renderList();
   updateSearchPlaceholder();
-  const n = State.visibleIds.length, t = State.sortedIds.length;
-  $('results-count').textContent = n === t ? msg('results-count', t) : msg('search-filtered', n, t);
+  updateFilterButtons();
 }
 
+/** Render ulang daftar dari awal; butir berikutnya ditambahkan saat pengguna menggulir ke bawah. */
 function renderList() {
   if (!DOM.hasilList) return;
-  const isGrid = State.viewMode === 'grid';
-  const pages  = Math.max(1, Math.ceil(State.visibleIds.length / PAGE_SIZE));
-  State.page   = Math.min(State.page || 0, pages - 1);
-  DOM.hasilList.className = isGrid ? 'result-grid' : 'result-list';
+  // Galeri hanya untuk "Ada foto"; selain itu daftar
+  DOM.hasilList.className = State.filter.image === 'has' ? 'result-grid' : 'result-list';
   DOM.hasilList.innerHTML = '';
+  State.shown = 0;
+  appendItems(LOAD_STEP);
+}
 
-  const start = State.page * PAGE_SIZE;
-  const end   = Math.min(start + PAGE_SIZE, State.visibleIds.length);
-  for (let i = start; i < end; i++) {
+/** Tambah `count` butir berikutnya di bawah daftar. */
+function appendItems(count) {
+  const isGrid = State.filter.image === 'has';
+  const end = Math.min(State.shown + count, State.visibleIds.length);
+  for (let i = State.shown; i < end; i++) {
     if (isGrid) renderGridItem(State.visibleIds[i], i);
     else        renderListItem(State.visibleIds[i], i);
   }
-  State.renderedPage = State.page;
-  renderPager(pages, start, end);
+  State.shown = end;
+  updateListEnd();
 }
 
-/** Navigasi halaman di bawah daftar: ‹ Sebelumnya · 51–100 dari 1.234 · Berikutnya › */
-function renderPager(pages, start, end) {
-  const pager = $('hasil-pager');
-  if (!pager) return;
-  pager.classList.toggle('hidden', pages <= 1);
-  if (pages <= 1) return;
-  pager.innerHTML = `
-    <button type="button" class="btn btn--secondary btn--sm" data-page="${State.page - 1}"${State.page === 0 ? ' disabled' : ''}>‹ ${escHtml(msg('panel-previous'))}</button>
-    <span class="pager-info">${escHtml(msg('results-range', start + 1, end, State.visibleIds.length))}</span>
-    <button type="button" class="btn btn--secondary btn--sm" data-page="${State.page + 1}"${State.page >= pages - 1 ? ' disabled' : ''}>${escHtml(msg('panel-next'))} ›</button>`;
+/** Penanda di bawah daftar: "1–40 dari 694" selama masih ada lanjutan, lalu total di akhir. */
+function updateListEnd() {
+  const el = $('hasil-end');
+  if (!el) return;
+  const n = State.visibleIds.length, t = State.sortedIds.length;
+  el.classList.toggle('hidden', !n);
+  el.textContent = State.shown < n ? msg('results-range', 1, State.shown, n)
+    : n === t ? msg('results-count', n) : msg('search-filtered', n, t);
+  // Amati ulang: bila penanda masih terlihat setelah butir ditambah, observer terpanggil lagi
+  if (_listObserver) {
+    _listObserver.unobserve(el);
+    if (State.shown < n) _listObserver.observe(el);
+  }
 }
 
-function goToPage(page) {
-  State.page = page;
-  renderList();
-  // Kembali ke awal daftar halaman baru
-  DOM.sections.hasil?.scrollTo({ top: $('hasil-container').offsetTop - 8, behavior: 'smooth' });
+/** Kembali dari detail: pastikan butir yang terakhir dibuka sudah dirender, lalu gulir ke sana. */
+function revealCurrentItem() {
+  const i = State.currentIndex;
+  if (i < 0 || !_listBuilt) return;
+  if (i >= State.shown) appendItems(i + 1 - State.shown);
+  DOM.hasilList?.querySelector(`[data-index="${i}"]`)?.scrollIntoView({ block: 'center' });
 }
 
 function renderListItem(qid, index) {
@@ -806,10 +832,13 @@ function refreshListThumbs() {
   });
 }
 
+/** Placeholder kotak cari sekaligus penanda pencarian: "Cari di 694 Masjid di Sumatera Barat…". */
 function updateSearchPlaceholder() {
   if (!DOM.searchInput) return;
   const n = State.visibleIds.length, t = State.sortedIds.length;
-  DOM.searchInput.placeholder = n === t ? msg('search-in-results', n) : msg('search-filtered', n, t);
+  DOM.searchInput.placeholder = n === t
+    ? msg('search-in-results', t, State.params?.klasterLabel || '', State.params?.wilayahNama || '')
+    : msg('search-filtered', n, t);
 }
 
 // ---------------------------------------------------------------------------
@@ -839,7 +868,6 @@ function openDetail(index) {
   const qid = State.visibleIds[index];
   if (!qid) return;
   State.currentIndex = index;
-  State.page = Math.floor(index / PAGE_SIZE);  // kembali ke halaman hasil yang memuat butir ini
   renderDetail(qid);
   showSection('detail');
   mapFlyTo(State.records[qid]);
@@ -943,7 +971,7 @@ function renderDetail(qid) {
 
     </div>`;
 
-  const backToResults = () => { mapShowShape(null); showSection('hasil'); };
+  const backToResults = () => { mapShowShape(null); showSection('hasil'); revealCurrentItem(); };
   el.querySelector('#btn-kembali-detail')?.addEventListener('click', backToResults);
   el.querySelector('#btn-prev')?.addEventListener('click', () => {
     if (State.currentIndex > 0) openDetail(State.currentIndex - 1);
@@ -1010,7 +1038,8 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
     `<li class="detail-data-row"><span class="detail-info-key">${escHtml(key)}</span><span class="detail-info-val">${valHtml}</span></li>`;
   const items = [];
 
-  if (r?.provLabel) items.push(row(msg('region-label'), escHtml(r.provLabel)));
+  const prov = r?.provLabels?.length ? r.provLabels.join(', ') : r?.provLabel;
+  if (prov) items.push(row(msg('region-label'), escHtml(prov)));
   if (detail.tipe) {
     const tipe = detail.tipe.split(', ').map(k => k.charAt(0).toUpperCase() + k.slice(1)).join(', ');
     items.push(row(msg('detail-type'), escHtml(tipe)));
@@ -1026,9 +1055,10 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
     items.push(row(attr.label, val));
   });
 
-  // Properti tambahan pengguna untuk butir ini (di luar skema kategori)
+  // Properti tambahan pengguna untuk butir ini (di luar skema kategori).
+  // attr.more = nilai kedua dst. untuk properti yang sudah terisi (PROP_MULTI_VALUE)
   (detail.extra || []).forEach(attr => {
-    const v = detail.values[attr.pid];
+    const v = attr.more ? null : attr.saved || detail.values[attr.pid];
     items.push(v ? row(attr.label, v.url ? `<a href="${escHtml(v.url)}" target="_blank" rel="noopener" class="break-all">${escHtml(v.text)}</a>` : escHtml(v.text))
                  : renderEmptyPropRow(attr));
   });
@@ -1049,7 +1079,7 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
     </div>`;
   }
 
-  const nAll = Object.keys(detail.claims || {}).length;
+  const nAll = Object.keys(otherClaims(qid)).length;
   if (nAll) {
     html += `<details class="detail-all">
       <summary>${escHtml(msg('detail-all-data', nAll))}</summary>
@@ -1072,10 +1102,10 @@ function renderEmptyPropRow(attr) {
   return `<li class="detail-data-row detail-prop-empty-row" data-pid="${escHtml(attr.pid)}">
     <span class="detail-info-key">${escHtml(attr.label)}</span>
     <span class="detail-info-val">
-      <span class="prop-empty-badge">${escHtml(msg('detail-empty-value'))}</span>
+      <span class="prop-empty-badge">${escHtml(msg(attr.more ? 'detail-new-value' : 'detail-empty-value'))}</span>
       ${APP_USER ? `<span class="prop-actions">
         <button class="js-prop-pencil prop-add-btn" type="button" title="${escHtml(msg('prop-add'))}">${escHtml(msg('detail-add-manual'))}</button>
-        <button class="js-prop-ai prop-add-btn prop-add-btn--ai" type="button" title="${escHtml(msg('detail-ai-title'))}">✨ AI</button>
+        ${attr.more ? '' : `<button class="js-prop-ai prop-add-btn prop-add-btn--ai" type="button" title="${escHtml(msg('detail-ai-title'))}">✨ AI</button>`}
       </span>`
       // Tamu: tombol Isi tetap terlihat, tetapi mengarah ke halaman masuk; tanpa tombol AI
       : `<a href="${loginUrl()}" class="prop-add-btn" title="${escHtml(msg('detail-login-to-fill'))}">${escHtml(msg('detail-add-manual'))}</a>`}
@@ -1165,8 +1195,17 @@ function attachAddProperty(qid, container) {
   const r = State.records[qid];
   let results = [], timer = null, ctrl = null, suggested = null;
 
-  // Properti yang sudah ada di butir atau sudah tampil di panel tidak ditawarkan lagi
-  const taken = () => new Set([...Object.keys(r._detail.claims || {}), ...detailAttrs(qid).map(a => a.pid)]);
+  // Properti yang sudah ada di butir atau sudah tampil di panel tidak ditawarkan lagi,
+  // kecuali PROP_MULTI_VALUE yang sudah terisi (boleh punya beberapa nilai) dan belum sedang ditambah
+  const hasValue = pid => !!(r._detail.claims?.[pid] || r._detail.values[pid]);
+  const taken = () => {
+    const ids = new Set([...Object.keys(r._detail.claims || {}), ...detailAttrs(qid).map(a => a.pid)]);
+    PROP_MULTI_VALUE.forEach(pid => {
+      const pending = (r._detail.extra || []).some(a => a.pid === pid && a.more);
+      if (hasValue(pid) && !pending) ids.delete(pid);
+    });
+    return ids;
+  };
 
   const render = (items, heading) => {
     // Properti yang belum bisa disunting di sini ditaruh paling bawah
@@ -1226,7 +1265,7 @@ function attachAddProperty(qid, container) {
     e.preventDefault();
     const p = results[+li.dataset.index];
     if (!p?.type) return;
-    const attr = { pid: p.id, label: ucFirst(p.label), type: p.type, unit: '', unitLabel: '', extra: true };
+    const attr = { pid: p.id, label: ucFirst(p.label), type: p.type, unit: '', unitLabel: '', extra: true, more: hasValue(p.id) };
     if (p.type === 'quantity') {
       list.innerHTML = `<li class="prop-suggest-empty">${escHtml(msg('loading'))}</li>`;
       try { attr.units = await fetchPropertyUnits(p.id); } catch { attr.units = []; }
@@ -1247,11 +1286,21 @@ function attachAddProperty(qid, container) {
   input.addEventListener('focus', () => { if (!input.value.trim()) showSuggested(); });
 }
 
-/** "Lihat semua data": semua properti butir, dimuat saat pertama dibuka. */
+// Properti yang boleh diberi nilai tambahan walau sudah terisi (server: MULTI_VALUE_PROPS di api/routes.py):
+// terbuat dari, teknik pembuatan, bagian dari, status warisan budaya
+const PROP_MULTI_VALUE = new Set(['P186', 'P2079', 'P361', 'P1435']);
+
+/** Klaim yang belum tampil di Data Utama (Tipe = P31, atribut skema, properti tambahan). */
+function otherClaims(qid) {
+  const shown = new Set(['P31', ...detailAttrs(qid).map(a => a.pid)]);
+  return Object.fromEntries(Object.entries(State.records[qid]._detail.claims || {}).filter(([pid]) => !shown.has(pid)));
+}
+
+/** "Data lainnya": properti butir di luar Data Utama, dimuat saat pertama dibuka. */
 async function renderAllData(qid, details) {
   const body = details.querySelector('.detail-all-body');
   try {
-    const rows = await fetchAllClaimsView(State.records[qid]._detail.claims, State.abortCtrl?.signal);
+    const rows = await fetchAllClaimsView(otherClaims(qid), State.abortCtrl?.signal);
     const MAX = 5;
     body.innerHTML = `<ul class="detail-data detail-data--all">${rows.map(row => {
       const vals = row.values.slice(0, MAX).map(v => v.url
@@ -1353,7 +1402,10 @@ function attachPropEditHandlers(qid, container) {
 
       const r = State.records[qid];
       if (r?._detail) {
-        r._detail.values[attr.pid] = formatNilaiBaru(attr, value, input.dataset.label);
+        const shown = formatNilaiBaru(attr, value, input.dataset.label);
+        // Nilai tambahan tampil sebagai baris sendiri; nilai lama tetap di barisnya
+        if (attr.more) { attr.more = false; attr.saved = shown; }
+        else r._detail.values[attr.pid] = shown;
         renderDetailProps(qid);
         flashSavedRow(qid, attr.label);
       }
@@ -1370,7 +1422,7 @@ function attachPropEditHandlers(qid, container) {
 
   // Tombol ✨ AI per atribut, dan kandidat AI yang sudah ada (mis. dari Perkaya Data) langsung ditampilkan
   container.querySelectorAll('.detail-prop-empty-row').forEach(li => {
-    li.querySelector('.js-prop-ai').addEventListener('click', () => aiSearchRow(qid, li));
+    li.querySelector('.js-prop-ai')?.addEventListener('click', () => aiSearchRow(qid, li));
   });
   aiShowExisting(qid, container);
 
@@ -1449,7 +1501,7 @@ async function aiSearchRow(qid, li) {
     const { ok, status, data } = await aiSearch({
       qid, label: r.title, description: r._detail?.description || '',
       kategori: State.params?.klasterNama || '',
-      lokasi: [r.lokLabel, r.provLabel].filter((v, i, a) => v && a.indexOf(v) === i).join(', '),
+      lokasi: [r.lokLabel, ...(r.provLabels || [r.provLabel])].filter((v, i, a) => v && a.indexOf(v) === i).join(', '),
     }, attr);
     if (!li.isConnected) return true;
     btn.disabled = false;
@@ -1796,10 +1848,12 @@ document.addEventListener('DOMContentLoaded', () => {
   DOM.btnJelajahi?.addEventListener('click', startSearch);
   $('btn-ubah-pencarian')?.addEventListener('click', () => showSection('landing'));
   $('btn-hasil-terakhir')?.addEventListener('click', () => showSection('hasil'));
-  $('hasil-pager')?.addEventListener('click', e => {
-    const btn = e.target.closest('button[data-page]');
-    if (btn && !btn.disabled) goToPage(Number(btn.dataset.page));
-  });
+  // Muat butir berikutnya saat penanda di bawah daftar terlihat
+  if ('IntersectionObserver' in window) {
+    _listObserver = new IntersectionObserver(entries => {
+      if (entries.some(e => e.isIntersecting) && State.shown < State.visibleIds.length) appendItems(LOAD_STEP);
+    });
+  }
 
   // Cukupkan: hentikan penarikan, tampilkan data yang sudah masuk
   $('btn-cukupkan')?.addEventListener('click', e => {
@@ -1819,12 +1873,16 @@ document.addEventListener('DOMContentLoaded', () => {
   DOM.searchInput?.addEventListener('input', e => {
     State.filter.search = e.target.value; applyFilter();
   });
-  // Filter: Semua / Ada artikel (daftar) / Ada foto (galeri)
-  [DOM.btnSemua, DOM.btnArtikel, DOM.btnGambar].forEach(btn => btn?.addEventListener('click', () => {
-    const f = btn.dataset.filter;
-    State.viewMode = f === 'image' ? 'grid' : 'list';
-    State.filter.mediaOnly = f === 'all' ? null : f;
-    setFilterButton(f);
+  // Semua: lepas semua saringan (wilayah, kata cari, gambar, artikel)
+  DOM.btnSemua?.addEventListener('click', () => {
+    State.filter = { wilayah: 'all', search: '', image: null, article: null };
+    if (DOM.filterWilayah) DOM.filterWilayah.value = 'all';
+    if (DOM.searchInput) DOM.searchInput.value = '';
+    applyFilter();
+  });
+  // Artikel / Foto: Ada → Tanpa → lepas; keduanya bisa aktif bersamaan
+  [[DOM.btnArtikel, 'article'], [DOM.btnGambar, 'image']].forEach(([btn, key]) => btn?.addEventListener('click', () => {
+    State.filter[key] = nextMediaFilter(State.filter[key]);
     applyFilter();
   }));
 
