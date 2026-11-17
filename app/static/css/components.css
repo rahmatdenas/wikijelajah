@@ -613,13 +613,13 @@ select option { color: var(--color-text); }
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.88);
 }
-.lightbox-content { position: relative; max-width: 92vw; max-height: 92vh; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.lightbox-content { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; }
 /* Sisakan ruang untuk judul & kredit di bawah foto */
-.lightbox-img { max-width: 92vw; max-height: calc(90vh - 64px); object-fit: contain; border-radius: var(--radius-sm); }
+.lightbox-img { max-width:calc(100vw - 24px); max-height: calc(90vh - 64px); object-fit: contain; border-radius: var(--radius-sm); }
 .lightbox-info { max-width: 92vw; padding-top: var(--space-2); text-align: center; color: #fff; }
 .lightbox-title {
   display: inline-flex; align-items: center; gap: 6px;
-  color: #fff; font-size: var(--text-sm); font-weight: 600; word-break: break-word;
+  color: #fff; font-size: var(--text-sm); font-weight: 600; word-break: break-word; text-decoration: none;
 }
 .lightbox-credit { margin: 4px 0 0; color: rgba(255, 255, 255, 0.75); font-size: var(--text-xs); }
 .lightbox-credit:empty { display: none; }
