@@ -281,10 +281,12 @@ function buildItemsQuery(p) {
 // ---------------------------------------------------------------------------
 
 // Batas waktu menunggu jawaban (header HTTP) WQS; unduhan & parsing JSON tidak ikut dihitung.
-// Data utama mengikuti batas WQS sendiri (60 detik) dan tidak diulang bila timeout: query daftar
-// yang berat memang bisa butuh 30–55 detik. Koordinat & media (query VALUES kecil) biasanya
-// selesai dalam hitungan detik, jadi 30 detik tanpa jawaban berarti server sedang sibuk → diulang.
-const WD_TIMEOUT_MAIN  = 60000;
+// Data utama tidak diulang bila timeout: query daftar yang berat memang butuh hingga ±56 detik
+// (Masjid se-Indonesia). Batas 60 detik WQS hanya untuk eksekusi query, belum antrean & jaringan,
+// dan bila query melewatinya WQS sendiri mengirim galat timeout, jadi timer ini cadangan untuk
+// koneksi macet saja → dibuat longgar. Koordinat & media (query VALUES kecil) biasanya selesai
+// dalam hitungan detik, jadi 30 detik tanpa jawaban berarti server sedang sibuk → diulang.
+const WD_TIMEOUT_MAIN  = 90000;
 const WD_TIMEOUT_BATCH = 30000;
 // Batch koordinat/media yang berjalan bersamaan (WQS membatasi query bersamaan per IP)
 const WD_PARALLEL = 4;
