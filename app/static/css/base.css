@@ -107,6 +107,7 @@ button { font-family: inherit; }
 }
 
 .wikimedia-w { flex-shrink: 0; }
+.top-nav-help-q { display: none; }
 
 /* --- Dropdown profil & bahasa --- */
 .top-nav-menu-wrap { position: relative; }

@@ -427,20 +427,13 @@ async function startSearch() {
     negaraQid: tipe === 'luar_negeri' ? negaraQid : '',
   };
 
-  // Bawa konteks ke URL (bisa dibagikan), top nav, dan tautan Perkaya Data
+  // Bawa konteks ke URL (bisa dibagikan) dan top nav
   const ctx = searchContext(params);
   if (ctx) {
     saveSearchContext(ctx);
     const q = new URLSearchParams(contextQuery(ctx));
     if (ctx.area) q.set('area_label', wilayahNama);
     history.replaceState(null, '', `${location.pathname}?${q}`);
-  }
-  const enrichLink = $('btn-enrich');
-  if (enrichLink) {
-    // Perkaya Data belum mendukung wilayah bebas (Q-ID) — tautan hanya untuk provinsi/nasional/luar negeri
-    const bisa = ctx && ctx.region !== 'area';
-    enrichLink.classList.toggle('hidden', !bisa);
-    if (bisa) enrichLink.href = contextUrl(enrichLink.pathname, ctx);
   }
 
   // Reset state
@@ -1036,16 +1029,17 @@ function renderDetail(qid) {
   el.innerHTML = `
     <div class="detail-panel">
 
-      <div class="detail-nav">
+      <div class="detail-nav panel-nav">
         <button class="back-link" id="btn-kembali-detail">← ${escHtml(msg('detail-back'))}</button>
-        ${counter ? `<div class="detail-pager">
-          <button class="icon-btn" id="btn-prev" type="button" aria-label="${escHtml(msg('panel-previous'))}" title="${escHtml(msg('panel-previous'))}">‹</button>
-          <span class="detail-back-counter">${counter}</span>
-          <button class="icon-btn" id="btn-next" type="button" aria-label="${escHtml(msg('panel-next'))}" title="${escHtml(msg('panel-next'))}">›</button>
-        </div>` : ''}
+        <div class="panel-nav-actions">
+          ${counter ? `<div class="detail-pager">
+            <button class="icon-btn" id="btn-prev" type="button" aria-label="${escHtml(msg('panel-previous'))}" title="${escHtml(msg('panel-previous'))}">‹</button>
+            <span class="detail-back-counter">${counter}</span>
+            <button class="icon-btn" id="btn-next" type="button" aria-label="${escHtml(msg('panel-next'))}" title="${escHtml(msg('panel-next'))}">›</button>
+          </div>` : ''}
+        </div>
       </div>
 
-      ${kategoriNama ? `<p class="detail-kategori">${escHtml(kategoriNama)}</p>` : ''}
       <h2 class="detail-title${isRawQid ? ' detail-title--unlabeled' : ''}">
         ${isRawQid ? `<span class="detail-title-qid">${escHtml(r.id)}</span><span class="detail-title-nolabel"> — ${escHtml(msg('detail-unlabeled'))}</span>` : escHtml(r.title)}
       </h2>
@@ -1068,8 +1062,6 @@ function renderDetail(qid) {
           <p class="detail-excerpt-loading">${escHtml(msg('detail-loading'))}</p>
         </div>
       </section>
-
-      <div id="detail-enrich-${escHtml(qid)}"></div>
 
     </div>`;
 
@@ -1253,7 +1245,6 @@ function renderDetailProps(qid) {
   attachPropEditHandlers(qid, el);
   attachAddProperty(qid, el);
   el.querySelector('.detail-all')?.addEventListener('toggle', e => renderAllData(qid, e.currentTarget), { once: true });
-  renderDetailEnrichLink(qid);
 }
 
 /** Sorot sebentar baris yang baru tersimpan agar terlihat apa yang berubah (baris dicari lewat labelnya). */
@@ -1417,18 +1408,6 @@ async function renderAllData(qid, details) {
   } catch (err) {
     if (err.name !== 'AbortError') body.innerHTML = `<p class="detail-excerpt-loading">${escHtml(msg('detail-load-failed'))}</p>`;
   }
-}
-
-/** Masih ada yang kosong: tautan untuk mengerjakan banyak butir sekaligus di Perkaya Data. */
-function renderDetailEnrichLink(qid) {
-  const more = $(`detail-enrich-${qid}`);
-  if (!more) return;
-  const r = State.records[qid];
-  const missing = skemaKategori(State.params?.klasterNama || '').some(a => !r._detail.values[a.pid]);
-  const ctx = State.params && searchContext(State.params);
-  more.innerHTML = APP_USER && missing && ctx && ctx.region !== 'area'
-    ? `<a href="${escHtml(contextUrl('/enrich', ctx))}" class="detail-more-link">${escHtml(msg('detail-ai-open-enrich'))}</a>`
-    : '';
 }
 
 /** Nilai tampilan untuk atribut yang baru disimpan (tanpa perlu memuat ulang). */
@@ -1805,55 +1784,122 @@ function closeLightbox() {
 // ---------------------------------------------------------------------------
 // MOBILE BOTTOM-SHEET
 // ---------------------------------------------------------------------------
+// Tiga posisi panel di HP: terbuka penuh, sebagian (sampai bawah tombol Semua / Ada artikel / Ada foto,
+// jadi pencarian & filter tetap bisa dipakai sambil melihat peta), dan tersembunyi (tinggal pegangan).
+// Tinggi sebagian sama dengan responsive.css.
+const SHEET_PEEK = 212;
+let _setSheetOpen = null;
+
 function initBottomSheet() {
   const handle = $('panel-handle');
   const panel  = $('panel');
   if (!handle || !panel) return;
 
-  const CLOSED_Y = () => panel.offsetHeight - 56; // hanya handle yang terlihat
-  const OPEN_Y   = 0;
-
-  let startY = 0, startTranslate = 0, dragging = false, moved = false;
+  const STOPS = () => ({
+    open:   0,
+    peek:   panel.offsetHeight - SHEET_PEEK,
+    hidden: panel.offsetHeight - handle.offsetHeight,
+  });
+  const SWIPE_MIN = 60;  // jarak tarik/usap (px) agar panel berpindah; kurang dari itu kembali ke posisi semula
 
   function getCurrentTranslateY() {
     const m = new DOMMatrix(getComputedStyle(panel).transform);
     return m.m42;
   }
 
-  function snapTo(targetY) {
+  function snapTo(stop) {
     panel.classList.remove('dragging');
-    panel.style.transform = `translateY(${targetY}px)`;
+    panel.style.transform = `translateY(${STOPS()[stop]}px)`;
+    panel.dataset.sheet = stop;
+    // Ikon tombol peta / daftar mengikuti kelas ini (responsive.css)
+    panel.classList.toggle('sheet-closed', stop !== 'open');
+  }
+  _setSheetOpen = open => snapTo(open ? 'open' : 'peek');
+  // Posisi awal di CSS adalah sebagian (mis. jendela desktop yang dikecilkan jadi ukuran HP)
+  panel.dataset.sheet = 'peek';
+  panel.classList.add('sheet-closed');
+
+  /** Geser panel mengikuti jari, dibatasi antara terbuka dan tersembunyi. */
+  function dragTo(y) {
+    panel.style.transform = `translateY(${Math.max(STOPS().open, Math.min(STOPS().hidden, y))}px)`;
   }
 
+  /** Setelah ditarik: berhenti di posisi terdekat; tarikan pendek kembali ke posisi awal. */
+  function settle(fromStop) {
+    const stops = STOPS();
+    const y = getCurrentTranslateY();
+    const moved = y - stops[fromStop];
+    if (Math.abs(moved) < SWIPE_MIN) return snapTo(fromStop);
+    // Hanya posisi di arah tarikan; yang terdekat dengan posisi jari saat dilepas
+    const ahead = Object.keys(stops).filter(k => moved > 0 ? stops[k] > stops[fromStop] : stops[k] < stops[fromStop]);
+    snapTo(ahead.reduce((a, b) => Math.abs(stops[b] - y) < Math.abs(stops[a] - y) ? b : a));
+  }
+
+  // Tombol di baris navigasi: pengguna awam belum tahu panel bisa ditarik untuk melihat peta
+  document.addEventListener('click', e => {
+    if (e.target.closest('.js-sheet-toggle')) _setSheetOpen(panel.dataset.sheet !== 'open');
+  });
+
+  // Pegangan: tarik ke posisi mana pun; ketuk = buka penuh, atau turun ke sebagian bila sudah terbuka
+  let grab = null;  // { y, from, moved }
   handle.addEventListener('pointerdown', e => {
-    dragging = true;
-    moved = false;
-    startY = e.clientY;
-    startTranslate = getCurrentTranslateY();
+    grab = { y: e.clientY, from: panel.dataset.sheet, start: getCurrentTranslateY(), moved: false };
     panel.classList.add('dragging');
-    panel.style.transform = `translateY(${startTranslate}px)`;
     handle.setPointerCapture(e.pointerId);
   });
 
   handle.addEventListener('pointermove', e => {
-    if (!dragging) return;
-    const dy = e.clientY - startY;
-    if (Math.abs(dy) > 5) moved = true;
-    const next = Math.max(OPEN_Y, Math.min(CLOSED_Y(), startTranslate + dy));
-    panel.style.transform = `translateY(${next}px)`;
+    if (!grab) return;
+    const dy = e.clientY - grab.y;
+    if (Math.abs(dy) > 5) grab.moved = true;
+    dragTo(grab.start + dy);
   });
 
-  handle.addEventListener('pointerup', e => {
-    if (!dragging) return;
-    dragging = false;
-    const current = getCurrentTranslateY();
-    // Ketuk tanpa menarik: buka/tutup. Tarik: kalau sudah > 40% terbuka → buka penuh, sebaliknya tutup
-    if (!moved) snapTo(current > CLOSED_Y() / 2 ? OPEN_Y : CLOSED_Y());
-    else snapTo(current < CLOSED_Y() * 0.6 ? OPEN_Y : CLOSED_Y());
+  handle.addEventListener('pointerup', () => {
+    if (!grab) return;
+    if (grab.moved) settle(grab.from);
+    else snapTo(grab.from === 'open' ? 'peek' : 'open');
+    grab = null;
   });
+
+  // Usap isi panel: ke bawah saat gulirannya sudah mentok di atas → turun satu posisi;
+  // ke atas saat belum terbuka penuh → naik. Selain itu usapan tetap menggulir isi panel seperti biasa.
+  let swipe = null;  // { x, y, from, start, section, mode: null | 'drag' | 'scroll' }
+
+  panel.addEventListener('touchstart', e => {
+    if (!window.matchMedia('(max-width: 800px)').matches || e.touches.length !== 1) return;
+    if (e.target.closest('#panel-handle')) return;  // pegangan punya penanganan sendiri
+    const t = e.touches[0];
+    swipe = { x: t.clientX, y: t.clientY, from: panel.dataset.sheet, start: getCurrentTranslateY(),
+              section: e.target.closest('.panel-section'), mode: null };
+  }, { passive: true });
+
+  panel.addEventListener('touchmove', e => {
+    if (!swipe || swipe.mode === 'scroll') return;
+    const t  = e.touches[0];
+    const dy = t.clientY - swipe.y;
+    if (!swipe.mode) {
+      if (Math.abs(dy) < 6) return;
+      const atTop    = !swipe.section || swipe.section.scrollTop <= 0;
+      const vertical = Math.abs(dy) > Math.abs(t.clientX - swipe.x);
+      const canDrag  = dy < 0 ? swipe.from !== 'open' : atTop && swipe.from !== 'hidden';
+      swipe.mode = vertical && canDrag ? 'drag' : 'scroll';
+      if (swipe.mode === 'scroll') return;
+      panel.classList.add('dragging');
+    }
+    e.preventDefault();  // jangan ikut menggulir / memantul selama panel ditarik
+    dragTo(swipe.start + dy);
+  }, { passive: false });
+
+  const endSwipe = () => {
+    if (swipe?.mode === 'drag') settle(swipe.from);
+    swipe = null;
+  };
+  panel.addEventListener('touchend', endSwipe);
+  panel.addEventListener('touchcancel', endSwipe);
 
   // Pengguna baru langsung melihat form, bukan hanya peta dengan pegangan kecil di bawah
-  if (window.matchMedia('(max-width: 800px)').matches) snapTo(OPEN_Y);
+  if (window.matchMedia('(max-width: 800px)').matches) snapTo('open');
 }
 
 // ---------------------------------------------------------------------------
@@ -1880,8 +1926,7 @@ function buildMapPopupHtml(r) {
 }
 
 function openBottomSheet() {
-  const panel = $('panel');
-  if (panel) panel.style.transform = 'translateY(0)';
+  _setSheetOpen?.(true);
 }
 
 // ---------------------------------------------------------------------------
@@ -1963,6 +2008,10 @@ document.addEventListener('DOMContentLoaded', () => {
     e.currentTarget.textContent = msg('stopping');
     State.stopCtrl?.abort();
   });
+
+  // Tambah butir baru: fitur menyusul
+  $('btn-tambah-butir')?.addEventListener('click', () =>
+    appShowDialog(escHtml(msg('add-item-soon')), 'alert', msg('add-item')));
 
   // Hentikan (bar status): hentikan langkah latar yang berjalan, data yang sudah masuk tetap dipakai
   $('btn-batalkan')?.addEventListener('click', () => State.stepCtrl?.abort());
