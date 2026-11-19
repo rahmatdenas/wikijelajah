@@ -21,7 +21,10 @@ const State = {
   abortCtrl:   null,
   stopCtrl:    null,      // "Cukupkan pencarian": hentikan penarikan, tampilkan yang sudah ada
   stepCtrl:    null,      // "Hentikan" di bar status: hentikan langkah latar (koordinat / media) yang berjalan
-  partial:     false,     // hasil tidak lengkap → jangan disimpan ke cache sesi
+  partial:     false,     // data utama tidak lengkap (dicukupkan / galat)
+  // QID yang koordinat / gambar-artikelnya belum termuat (batch gagal atau dihentikan) → "Coba lagi"
+  missing:     { coords: [], media: [] },
+  cacheKey:    null,
 };
 
 // Jumlah data minimal sebelum tombol "Cukupkan pencarian" muncul
@@ -451,6 +454,7 @@ async function startSearch() {
   State.abortCtrl = new AbortController();
   State.stopCtrl  = new AbortController();
   State.partial   = false;
+  State.missing   = { coords: [], media: [] };
   const signal = State.abortCtrl.signal;
 
   mapClear();
@@ -458,7 +462,7 @@ async function startSearch() {
   showSection('hasil');
 
   // ===== CEK CACHE SESI =====
-  const cacheKey = _cacheKey(params);
+  const cacheKey = State.cacheKey = _cacheKey(params);
   const cached   = _loadCache(cacheKey);
   if (cached) {
     State.records     = cached.records;
@@ -528,28 +532,10 @@ async function startSearch() {
     setLoadingStatus(null);
 
     // ===== FASE 2: Koordinat (bisa dihentikan; batch yang sudah masuk tetap dipakai) =====
-    const allQidsWd = allQids.map(q => `wd:${q}`);
-    const coordRes = await fetchCoordinates(allQidsWd, klasterNama, propLokasi, signal, {
-      stopSignal: startStep(),
-      onProgress: pct => setLoadingStatus(msg('loading-coordinates', klasterLabel, pct)),
-    });
-    Object.entries(coordRes.coords).forEach(([q, c]) => {
-      if (State.records[q]) { State.records[q].lat = c.lat; State.records[q].lon = c.lon; }
-    });
-    const markers = Object.values(State.records).map(r => mapBuildMarker(r)).filter(Boolean);
-    if (markers.length) { mapAddMarkers(markers); mapFitAll(); }
-    setLoadingStatus(null);
-    if (!coordRes.complete) {
-      State.partial = true;
-      addNote(coordRes.reason === 'stopped'
-        ? msg('partial-coords-stopped')
-        : msg('partial-coords-error', coordRes.error?.message || msg('unknown')));
-    }
+    await loadCoordinates(allQids, signal, { fitMap: true });
 
     // ===== FASE 3: Media (background), sesuai urutan tampil: butir teratas dapat gambar lebih dulu =====
-    loadMediaBackground([...State.sortedIds], signal, () => {
-      if (!State.partial) _saveCache(cacheKey, State.records, State.sortedIds);
-    });
+    loadMediaBackground([...State.sortedIds], signal);
 
   } catch (err) {
     if (err.name === 'AbortError') return;
@@ -566,12 +552,65 @@ function startStep() {
   return State.stepCtrl.signal;
 }
 
-/** Tambah satu baris ke catatan kuning di atas hasil (hasil sebagian / galat). */
-function addNote(text) {
+/**
+ * Tambah satu baris ke catatan kuning di atas hasil (hasil sebagian / galat).
+ * `kind` 'coords' / 'media' menggantikan baris sebelumnya dari langkah yang sama (setelah "Coba lagi").
+ */
+function addNote(text, kind = 'main') {
   const note = $('hasil-partial-note');
   if (!note) return;
-  note.textContent = note.textContent ? `${note.textContent}\n${text}` : text;
+  if (kind !== 'main') removeNote(kind);
+  const line = document.createElement('span');
+  line.className = 'hasil-partial-line';
+  line.dataset.kind = kind;
+  line.textContent = text;
+  note.insertBefore(line, note.querySelector('.hasil-retry'));
   note.classList.remove('hidden');
+}
+
+function removeNote(kind) {
+  const note = $('hasil-partial-note');
+  note?.querySelectorAll(`[data-kind="${kind}"]`).forEach(el => el.remove());
+  if (note && !note.querySelector('.hasil-partial-line')) note.classList.add('hidden');
+}
+
+/** Tombol "Coba lagi" di catatan kuning: hanya bila ada butir yang koordinat/medianya belum termuat. */
+function updateRetryButton() {
+  const note = $('hasil-partial-note');
+  if (!note) return;
+  const n = new Set([...State.missing.coords, ...State.missing.media]).size;
+  let btn = note.querySelector('.hasil-retry');
+  if (!n) { btn?.remove(); return; }
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'hasil-retry';
+    btn.addEventListener('click', retryMissing);
+    note.appendChild(btn);
+  }
+  btn.disabled = false;
+  btn.textContent = msg('partial-retry', n);
+}
+
+/** Muat ulang hanya butir yang koordinat / gambar-artikelnya belum termuat. */
+async function retryMissing() {
+  const signal = State.abortCtrl?.signal;
+  if (!signal || signal.aborted) return;
+  const btn = $('hasil-partial-note')?.querySelector('.hasil-retry');
+  if (btn) btn.disabled = true;
+  const { coords, media } = State.missing;
+  try {
+    if (coords.length) await loadCoordinates(coords, signal);
+    if (media.length)  await loadMediaBackground(media, signal);
+  } catch (e) {
+    if (e.name !== 'AbortError') console.warn('Retry failed:', e);
+  }
+}
+
+/** Simpan ke cache sesi hanya bila semua data sudah lengkap. */
+function maybeSaveCache() {
+  if (State.partial || State.missing.coords.length || State.missing.media.length || !State.mediaLoaded) return;
+  _saveCache(State.cacheKey, State.records, State.sortedIds);
 }
 
 /** Beri tahu bahwa hasil hanya sebagian, beserta alasannya. */
@@ -585,7 +624,7 @@ function resetHasilUI() {
   _listBuilt = false;
   $('hasil-empty')?.classList.add('hidden');
   const note = $('hasil-partial-note');
-  if (note) { note.textContent = ''; note.classList.add('hidden'); }
+  if (note) { note.innerHTML = ''; note.classList.add('hidden'); }
   setLoadingStatus(null);
   $('cukupkan-wrap')?.classList.add('hidden');
   const btnCukup = $('btn-cukupkan');
@@ -629,7 +668,9 @@ function updateFilterButtons() {
   };
   const media = (btn, state, field, hasKey, withoutKey) => {
     // Jumlah tidak terpengaruh saringan lain agar angkanya tetap
-    const n = State.mediaLoaded ? all.filter(r => !!r[field] === (state !== 'without')).length : null;
+    // Butir yang medianya belum termuat (undefined) tidak dihitung sebagai Ada maupun Tanpa
+    const n = State.mediaLoaded
+      ? all.filter(r => r[field] !== undefined && !!r[field] === (state !== 'without')).length : null;
     setLabel(btn, msg(state === 'without' ? withoutKey : hasKey), n, !!state);
   };
   setLabel(DOM.btnSemua, msg('filter-all'), all.length, !hasFilter());
@@ -645,7 +686,40 @@ function setMediaReady() {
   updateFilterButtons();
 }
 
-async function loadMediaBackground(qids, signal, onComplete) {
+/**
+ * Koordinat untuk `qids`, lalu tambahkan titiknya ke peta. Butir yang batchnya gagal / dihentikan
+ * dicatat di State.missing.coords agar bisa dicoba lagi. Melempar AbortError bila pencarian diganti.
+ */
+async function loadCoordinates(qids, signal, { fitMap = false } = {}) {
+  const { klasterNama, klasterLabel, propLokasi } = State.params;
+  const res = await fetchCoordinates(qids.map(q => `wd:${q}`), klasterNama, propLokasi, signal, {
+    stopSignal: startStep(),
+    onProgress: pct => setLoadingStatus(msg('loading-coordinates', klasterLabel, pct)),
+  });
+  const markers = [];
+  Object.entries(res.coords).forEach(([q, c]) => {
+    const r = State.records[q];
+    if (!r || r.lat !== undefined) return;
+    r.lat = c.lat; r.lon = c.lon;
+    const m = mapBuildMarker(r);
+    if (m) markers.push(m);
+  });
+  if (markers.length) { mapAddMarkers(markers); if (fitMap) mapFitAll(); }
+  setLoadingStatus(null);
+
+  State.missing.coords = res.missing.map(stripWd);
+  const n = State.missing.coords.length;
+  if (!n) removeNote('coords');
+  else addNote(res.reason === 'stopped'
+    ? msg('partial-coords-stopped', n)
+    : msg('partial-coords-error', res.error?.message || msg('unknown'), n), 'coords');
+  updateRetryButton();
+  maybeSaveCache();
+}
+
+const stripWd = q => q.replace(/^wd:/, '');
+
+async function loadMediaBackground(qids, signal) {
   try {
     const res = await fetchMedia(qids.map(q => `wd:${q}`), signal, {
       stopSignal: startStep(),
@@ -658,16 +732,21 @@ async function loadMediaBackground(qids, signal, onComplete) {
       mapRefreshMarkerIcon(r);
     });
     refreshListThumbs();
+    const wasLoaded = State.mediaLoaded;
     setMediaReady();
     setLoadingStatus(null);
-    if (res.complete) {
-      onComplete?.();
-    } else {
-      State.partial = true;
-      addNote(res.reason === 'stopped'
-        ? msg('partial-media-stopped')
-        : msg('partial-media-error', res.error?.message || msg('unknown')));
-    }
+    // Coba lagi saat saringan Foto/Artikel aktif → butir yang baru termuat ikut tersaring
+    if (wasLoaded && (State.filter.image || State.filter.article)) applyFilter();
+
+    // Butir yang tidak termuat tetap `undefined` (belum diketahui), bukan null (memang tidak ada)
+    State.missing.media = res.missing.map(stripWd).filter(q => State.records[q]?.imageFilename === undefined);
+    const n = State.missing.media.length;
+    if (!n) removeNote('media');
+    else addNote(res.reason === 'stopped'
+      ? msg('partial-media-stopped', n)
+      : msg('partial-media-error', res.error?.message || msg('unknown'), n), 'media');
+    updateRetryButton();
+    maybeSaveCache();
   } catch (e) {
     // AbortError = pencarian sudah diganti: jangan sentuh tampilan atau cache pencarian baru
     if (e.name === 'AbortError') return;
@@ -713,8 +792,8 @@ function applyFilter() {
   State.visibleIds = State.sortedIds.filter(id => {
     const r = State.records[id];
     if (wilayah !== 'all' && !r.provQids.includes(wilayah)) return false;
-    if (image   && !!r.imageFilename !== (image === 'has'))   return false;
-    if (article && !!r.articleTitle  !== (article === 'has')) return false;
+    if (image   && (r.imageFilename === undefined || !!r.imageFilename !== (image === 'has')))  return false;
+    if (article && (r.articleTitle  === undefined || !!r.articleTitle  !== (article === 'has'))) return false;
     if (q && ![r.title, r.lokLabel, ...r.provLabels].some(t => t?.toLowerCase().includes(q))) return false;
     return true;
   });

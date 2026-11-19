@@ -364,6 +364,9 @@ function _sleep(ms, signal) {
 async function sparqlWithRetry(query, signal, { maxRetry = 3, timeout = WD_TIMEOUT_MAIN, retryTimeout = false } = {}) {
   for (let i = 1; i <= maxRetry; i++) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    // Jeda 429 bersama: bila satu permintaan diminta menunggu, yang lain ikut menunggu
+    const cooldown = _rateLimitedUntil - Date.now();
+    if (cooldown > 0) await _sleep(cooldown, signal);
     try {
       return await sparqlPost(query, signal, timeout);
     } catch (err) {
@@ -372,10 +375,14 @@ async function sparqlWithRetry(query, signal, { maxRetry = 3, timeout = WD_TIMEO
         || (err.kind === 'timeout' && retryTimeout);
       if (!retryable || i === maxRetry) throw err;
       const wait = err.kind === 'rate' ? Math.min(err.retryAfter * 1000 || 5000 * i, 60000) : 1500 * i;
+      if (err.kind === 'rate') _rateLimitedUntil = Math.max(_rateLimitedUntil, Date.now() + wait);
       await _sleep(wait, signal);
     }
   }
 }
+
+// Batas waktu jeda 429 bersama (lihat sparqlWithRetry)
+let _rateLimitedUntil = 0;
 
 /** Gabungan beberapa AbortSignal: batal bila salah satunya batal. */
 function anySignal(signals) {
@@ -390,40 +397,52 @@ function anySignal(signals) {
 
 /**
  * Jalankan worker untuk setiap batch, paling banyak WD_PARALLEL sekaligus.
- * Batch yang gagal dilewati agar hasil batch lain tetap terpakai.
+ * Batch yang gagal dilewati agar hasil batch lain tetap terpakai. Batch yang tetap timeout setelah
+ * jatah ulangnya habis dipecah dua dan dicoba sekali lagi: sering hanya sebagian butirnya yang berat.
  * @param {Array}       chunks
- * @param {Function}    worker - (chunk, signal) => Promise; menulis hasilnya sendiri setelah respons utuh
+ * @param {Function}    worker - (chunk, signal, {maxRetry}) => Promise; menulis hasilnya sendiri setelah respons utuh
  * @param {AbortSignal} signal - batal total: melempar AbortError
  * @param {Object}      [opts]
  * @param {AbortSignal} [opts.stopSignal] - "Hentikan": berhenti, pertahankan batch yang sudah selesai
- * @param {Function}    [opts.onProgress] - persen batch yang selesai (0–100)
- * @returns {Promise<{complete: boolean, reason?: 'stopped'|'error', error?: Error}>}
+ * @param {Function}    [opts.onProgress] - persen butir yang selesai diproses (0–100)
+ * @returns {Promise<{complete: boolean, reason?: 'stopped'|'error', error?: Error, missing: Array}>}
+ *          `missing`: butir yang belum termuat (batchnya gagal atau belum sempat jalan)
  */
 async function runBatches(chunks, worker, signal, { stopSignal = null, onProgress = null } = {}) {
   const reqSignal = stopSignal ? anySignal([signal, stopSignal]) : signal;
-  let next = 0, done = 0, failed = 0, lastError = null;
+  const queue = chunks.map(chunk => ({ chunk, split: false }));
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const loaded = new Set();
+  let next = 0, processed = 0, stopped = false, lastError = null;
   onProgress?.(0);
 
   const lane = async () => {
-    while (next < chunks.length && !reqSignal?.aborted) {
-      const chunk = chunks[next++];
+    while (next < queue.length && !reqSignal?.aborted) {
+      const { chunk, split } = queue[next++];
       try {
-        await worker(chunk, reqSignal);
+        // Belahan batch sudah melewati jatah ulang batch induknya: cukup sekali coba
+        await worker(chunk, reqSignal, split ? { maxRetry: 1 } : {});
+        chunk.forEach(q => loaded.add(q));
       } catch (err) {
-        if (err.name === 'AbortError') return;
-        failed++;
+        if (err.name === 'AbortError') { stopped = true; return; }
+        if (err.kind === 'timeout' && !split && chunk.length > 1) {
+          const half = Math.ceil(chunk.length / 2);
+          queue.push({ chunk: chunk.slice(0, half), split: true }, { chunk: chunk.slice(half), split: true });
+          continue;
+        }
         lastError = err;
       }
-      done++;
-      onProgress?.(Math.round((done / chunks.length) * 100));
+      processed += chunk.length;
+      onProgress?.(Math.round((processed / total) * 100));
     }
   };
   await Promise.all(Array.from({ length: Math.min(WD_PARALLEL, chunks.length) }, lane));
 
   if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-  if (done < chunks.length) return { complete: false, reason: 'stopped' };
-  if (failed) return { complete: false, reason: 'error', error: lastError };
-  return { complete: true };
+  const missing = chunks.flat().filter(q => !loaded.has(q));
+  if (stopped || next < queue.length) return { complete: false, reason: 'stopped', missing };
+  if (missing.length) return { complete: false, reason: 'error', error: lastError, missing };
+  return { complete: true, missing };
 }
 
 /**
@@ -477,14 +496,14 @@ async function fetchAllPages(queryFn, signal, onRow, onPage, opts = {}) {
 /**
  * Koordinat per butir. Batch yang sudah selesai tetap dipakai bila dihentikan atau sebagian gagal.
  * Klaster via lokasi: koordinat hanya dipakai bila butir punya tepat satu lokasi.
- * @returns {Promise<{coords: Object, complete: boolean, reason?: string, error?: Error}>}
+ * @returns {Promise<{coords: Object, complete: boolean, reason?: string, error?: Error, missing: Array}>}
  */
 async function fetchCoordinates(qids, klasterNama, propLokasi, signal, opts = {}) {
   const useLokasi = KLASTER_TANPA_KOORDINAT_LANGSUNG.has(klasterNama);
   const coords = {};
   const lokasiCount = {};  // QID → jumlah lokasi berbeda (klaster via lokasi)
 
-  const status = await runBatches(chunkArray(qids, WD_COORD_BATCH), async (chunk, reqSignal) => {
+  const status = await runBatches(chunkArray(qids, WD_COORD_BATCH), async (chunk, reqSignal, attempt) => {
     let q;
     if (useLokasi) {
       const klausaKoordinat = `?site wdt:${propLokasi} ?p131 . FILTER(?p131 != wd:Q252) ?p131 p:P625 ?coordStatement .`;
@@ -494,7 +513,7 @@ async function fetchCoordinates(qids, klasterNama, propLokasi, signal, opts = {}
     } else {
       q = _T_COORDS_DIRECT.replace('<QIDS>', chunk.join(' '));
     }
-    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH, retryTimeout: true });
+    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH, retryTimeout: true, ...attempt });
     const lokasi = {};
     rows.forEach(r => {
       const qid = r.siteQid.value;
@@ -519,14 +538,14 @@ async function fetchCoordinates(qids, klasterNama, propLokasi, signal, opts = {}
 /**
  * Gambar dan artikel Wikipedia per butir; opsi sama dengan fetchCoordinates.
  * Kategori Commons tidak di sini: baru dibutuhkan saat detail dibuka (fetchDetailProps).
- * @returns {Promise<{media: Object, complete: boolean, reason?: string, error?: Error}>}
+ * @returns {Promise<{media: Object, complete: boolean, reason?: string, error?: Error, missing: Array}>}
  */
 async function fetchMedia(qids, signal, opts = {}) {
   const media = {};
 
-  const status = await runBatches(chunkArray(qids, WD_MEDIA_BATCH), async (chunk, reqSignal) => {
+  const status = await runBatches(chunkArray(qids, WD_MEDIA_BATCH), async (chunk, reqSignal, attempt) => {
     const q = _T_MEDIA.replace('<QIDS>', chunk.join(' '));
-    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH, retryTimeout: true });
+    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH, retryTimeout: true, ...attempt });
     rows.forEach(r => {
       const qid = r.siteQid.value.includes('entity/')
         ? r.siteQid.value.split('entity/')[1]
