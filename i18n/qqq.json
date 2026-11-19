@@ -39,6 +39,7 @@
 	"nav-profile": "Menu link to the user page of the logged-in user on mediawiki.org.",
 	"nav-logout": "Menu link to log out.\n{{Identical|Log out}}",
 	"nav-login": "Button to log in with a Wikimedia account.\n{{Identical|Log in}}",
+	"auth-returning": "Shown for a moment after logging in, before the browser returns to the page the user came from. Followed by a link with the app name (WikiJelajah).",
 	"region-province-choose": "Label of the province dropdown.",
 	"region-country-choose": "Label of the country dropdown.",
 	"region-province": "Short label of the province dropdown on the Enrich Data page.\n{{Identical|Province}}",

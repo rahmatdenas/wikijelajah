@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+{# Halaman perantara setelah login (auth/routes.py: _back_to_app). Kembali ke halaman asal lewat
+   navigasi baru dari situs ini, bukan lanjutan pengalihan dari meta.wikimedia.org: Chrome Android
+   bisa membawa mode "Situs desktop" milik meta ke halaman akhir rangkaian pengalihan. #}
+<html lang="{{ lang }}" dir="{{ lang_dir }}">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>{{ config.APP_NAME }}</title>
+  <style>
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+           font-family: system-ui, sans-serif; color: #52525b; background: #fff; }
+    a { color: #8a1414; }
+  </style>
+</head>
+<body>
+  <p>{{ msg('auth-returning') }} <a href="{{ target }}">{{ config.APP_NAME }}</a></p>
+  <script>location.replace({{ target | tojson }});</script>
+</body>
+</html>

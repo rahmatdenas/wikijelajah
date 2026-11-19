@@ -1,4 +1,4 @@
-from flask import current_app, redirect, request, session, url_for
+from flask import current_app, make_response, redirect, render_template, request, session, url_for
 from requests import get as requests_get
 from requests_oauthlib import OAuth2Session
 from . import auth
@@ -9,6 +9,18 @@ def _safe_next(next_url):
     if not next_url or not next_url.startswith('/') or next_url.startswith(('//', '/\\')):
         return url_for('main.index')
     return next_url
+
+
+def _back_to_app(next_url):
+    """Kembali ke halaman asal lewat halaman perantara, bukan 302 langsung.
+
+    Pengalihan dari meta.wikimedia.org → callback → halaman asal adalah satu rangkaian; Chrome Android
+    bisa menerapkan mode "Situs desktop" milik meta ke halaman akhirnya (tampilan WikiJelajah jadi
+    versi desktop). Navigasi baru yang dimulai dari situs ini memakai pengaturan situs ini sendiri.
+    """
+    resp = make_response(render_template('auth_return.html', target=_safe_next(next_url)))
+    resp.headers['Cache-Control'] = 'no-store'
+    return resp
 
 
 def _oauth_session(**kwargs):
@@ -37,7 +49,7 @@ def _login_with_token(token, next_url):
         'username': profile.get('username', 'Unknown'),
         'editcount': profile.get('editcount', 0),
     }
-    return redirect(_safe_next(next_url))
+    return _back_to_app(next_url)
 
 
 @auth.route('/login')
@@ -65,7 +77,7 @@ def callback():
         return redirect(url_for('main.index'))
     if 'error' in request.args or 'code' not in request.args:
         # Pengguna menolak izin atau meta mengembalikan galat
-        return redirect(_safe_next(next_url))
+        return _back_to_app(next_url)
 
     token = _oauth_session(state=state).fetch_token(
         f"{current_app.config['WIKIMEDIA_OAUTH_BASE']}/access_token",
