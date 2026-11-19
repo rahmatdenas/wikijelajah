@@ -364,10 +364,11 @@ function _loadCache(key) {
 function _saveCache(key, records, sortedIds) {
   try {
     // Leaflet marker/popup tidak bisa di-serialize — strip dulu.
-    // _detail juga dibuang agar detail selalu diambil segar (bisa sudah diedit).
+    // _detail juga dibuang agar detail selalu diambil segar (bisa sudah diedit);
+    // _imagePropsP adalah Promise (tidak bisa di-serialize), jadi ikut dibuang bersama hasilnya.
     const clean = {};
     for (const [qid, r] of Object.entries(records)) {
-      const { marker, popup, _detail, ...rest } = r;
+      const { marker, popup, _detail, _imagePropsP, _imageProps, ...rest } = r;
       clean[qid] = rest;
     }
     sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), records: clean, sortedIds }));
@@ -1089,6 +1090,8 @@ function renderDetail(qid) {
   if (r.articleTitle)  loadExcerpt(qid);
   loadDetailProps(qid);
   if (!mediaReady)     loadSingleItemMedia(qid);
+  // Jenis gambar yang sesuai butir disiapkan lebih awal, sebelum modal unggah / tautkan dibuka
+  if (APP_USER)        loadImageProps(qid).catch(() => {});
 
   // OSM shape
   if (!r._osmTriggered && r.lat) {
@@ -1448,6 +1451,19 @@ function imageAlreadyLinked(qid, prop, filename) {
     .some(c => sameCommonsFile(c.mainsnak.datavalue?.value, filename));
 }
 
+/**
+ * Jenis gambar yang sesuai butir, sekali per butir. Dimulai saat detail dibuka (pengguna masuk),
+ * jadi biasanya sudah siap saat modal unggah / tautkan dibuka.
+ */
+function loadImageProps(qid) {
+  const r = State.records[qid];
+  if (!r) return Promise.resolve(IMAGE_PROPS_ANY);
+  r._imagePropsP ||= fetchAllowedImageProps(qid, IMAGE_PROPS, State.abortCtrl?.signal)
+    .then(pids => (r._imageProps = pids))
+    .catch(err => { r._imagePropsP = null; throw err; });  // gagal / dibatalkan: coba lagi lain kali
+  return r._imagePropsP;
+}
+
 // Jenis gambar tanpa batasan jenis subjek di Wikidata (boleh untuk butir apa pun): ditawarkan
 // sambil menunggu pengecekan, atau bila pengecekan gagal
 const IMAGE_PROPS_ANY = ['P18', 'P1801', 'P12565', 'P8592'];
@@ -1456,7 +1472,7 @@ const IMAGE_PROPS_ANY = ['P18', 'P1801', 'P12565', 'P8592'];
 function fillImagePropSelect(select, pids, selected = '') {
   if (!select) return;
   select.innerHTML = `<option value="">— ${escHtml(msg('image-type-choose'))} —</option>`
-    + pids.map(pid => `<option value="${pid}">${escHtml(msg(`image-prop-${pid}`))}</option>`).join('');
+    + pids.map(pid => `<option value="${pid}">${escHtml(msg(`image-prop-${pid}`))} (${pid})</option>`).join('');
   select.value = pids.includes(selected) ? selected : '';
 }
 
@@ -1469,7 +1485,7 @@ async function prepareImagePropSelect(select, qid, selected) {
   fillImagePropSelect(select, r?._imageProps || IMAGE_PROPS_ANY, selected);
   if (!r || r._imageProps) return;
   try {
-    r._imageProps = await fetchAllowedImageProps(qid, IMAGE_PROPS, State.abortCtrl?.signal);
+    await loadImageProps(qid);
     // Modal mungkin sudah ditutup atau beralih ke butir lain
     if (select.closest('.upload-modal-overlay')?._qid === qid) {
       fillImagePropSelect(select, r._imageProps, select.value || selected);
@@ -2175,6 +2191,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Upload modal
   initUploadModal();
+  // Aturan jenis subjek properti gambar diambil sekali di awal, agar pengecekan di detail lebih cepat
+  if (APP_USER) fetchImagePropClasses(IMAGE_PROPS).catch(() => {});
   initLinkPhotoModal();
 
   // Landing default; tautan yang membawa pencarian langsung dijalankan
