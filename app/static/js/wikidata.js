@@ -1046,6 +1046,52 @@ async function fetchDetailProps(qid, klasterNama, signal) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// JENIS GAMBAR YANG SESUAI BUTIR (batasan "jenis subjek" properti gambar di Wikidata)
+// ---------------------------------------------------------------------------
+
+let _imagePropClassesP = null;
+
+/**
+ * Kelas yang diizinkan per properti menurut batasan jenis subjek (Q21503250) di Wikidata.
+ * Properti tanpa batasan tidak ada di hasil (boleh untuk butir apa pun). Diambil sekali per kunjungan.
+ * @returns {Promise<Object<string, string[]>>} pid → daftar QID kelas
+ */
+function fetchImagePropClasses(pids) {
+  _imagePropClassesP ||= _wbGet({ action: 'wbgetentities', ids: pids.join('|'), props: 'claims' })
+    .then(data => {
+      const out = {};
+      pids.forEach(pid => {
+        const classes = (data.entities?.[pid]?.claims?.P2302 || [])
+          .filter(c => c.mainsnak.datavalue?.value?.id === 'Q21503250')
+          .flatMap(c => (c.qualifiers?.P2308 || []).map(q => q.datavalue?.value?.id).filter(Boolean));
+        if (classes.length) out[pid] = classes;
+      });
+      return out;
+    })
+    .catch(err => { _imagePropClassesP = null; throw err; });  // coba lagi lain kali
+  return _imagePropClassesP;
+}
+
+/**
+ * Properti gambar yang sesuai untuk butir: tanpa batasan, atau butir termasuk (turunan) salah satu
+ * kelas yang diizinkan. Mis. "gambar makam" (P1442) hanya untuk manusia, bukan untuk masjid.
+ * @returns {Promise<string[]>} urutan sama dengan `pids`
+ */
+async function fetchAllowedImageProps(qid, pids, signal) {
+  const byProp = await fetchImagePropClasses(pids);
+  const classes = [...new Set(Object.values(byProp).flat())];
+  let matched = new Set();
+  if (classes.length) {
+    const rows = await sparqlWithRetry(`SELECT DISTINCT ?c WHERE {
+      VALUES ?c { ${classes.map(c => `wd:${c}`).join(' ')} }
+      { wd:${qid} wdt:P31/wdt:P279* ?c } UNION { wd:${qid} wdt:P279* ?c }
+    }`, signal, { maxRetry: 1, timeout: WD_TIMEOUT_BATCH });
+    matched = new Set(rows.map(r => r.c.value.split('/').pop()));
+  }
+  return pids.filter(pid => !byProp[pid] || byProp[pid].some(c => matched.has(c)));
+}
+
 /** Saran butir Wikidata untuk input atribut bertipe item. */
 /**
  * Cari wilayah administratif (kota, kabupaten, kecamatan, desa, … di mana pun) berdasarkan nama.

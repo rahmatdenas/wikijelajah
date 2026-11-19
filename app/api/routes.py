@@ -249,7 +249,32 @@ def add_claim(qid):
 
 
 # ---------------------------------------------------------------------------
-# Endpoint: tautkan file Commons yang sudah ada ke P18 Wikidata
+# Properti gambar yang boleh diisi lewat unggah / tautkan (sama dengan IMAGE_PROPS di main.js)
+IMAGE_PROPS = {'P18', 'P5775', 'P1442', 'P1766', 'P1801', 'P3451', 'P9721', 'P12565', 'P8592'}
+
+
+def _image_prop(value):
+    """Properti tujuan gambar; None bila bukan properti gambar yang diizinkan."""
+    prop = (value or 'P18').strip().upper()
+    return prop if prop in IMAGE_PROPS else None
+
+
+def _commons_name(filename):
+    """Nama berkas Commons yang sebanding: garis bawah = spasi, huruf pertama tidak peka besar-kecil."""
+    name = (filename or '').replace('_', ' ').strip()
+    return name[:1].upper() + name[1:]
+
+
+def _image_already_linked(http, wikidata_api, ua, qid, prop, filename):
+    """Apakah berkas ini sudah menjadi nilai `prop` di butir? Melempar galat bila gagal memeriksa."""
+    claims = http.get(wikidata_api, params={
+        'action': 'wbgetclaims', 'entity': qid, 'property': prop, 'format': 'json',
+    }, headers={'User-Agent': ua}, timeout=15).json().get('claims', {}).get(prop, [])
+    target = _commons_name(filename)
+    return any(_commons_name(c.get('mainsnak', {}).get('datavalue', {}).get('value')) == target for c in claims)
+
+
+# Endpoint: tautkan file Commons yang sudah ada ke properti gambar Wikidata (bawaan P18)
 # ---------------------------------------------------------------------------
 
 @api.route('/item/<qid>/set-image', methods=['POST'])
@@ -258,9 +283,12 @@ def set_image(qid):
     qid = qid.upper()
     body = request.get_json(silent=True) or {}
     filename = body.get('filename', '').strip()
+    prop = _image_prop(body.get('property'))
 
     if not filename:
         return jsonify({'error': msg('upload-filename-required')}), 400
+    if not prop:
+        return jsonify({'error': msg('api-image-prop-invalid')}), 400
 
     if filename.lower().startswith('file:'):
         filename = filename[5:]
@@ -268,6 +296,13 @@ def set_image(qid):
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
     ua   = _ua()
     http = _get_session()
+
+    # Berkas yang sama jangan ditautkan dua kali ke properti yang sama
+    try:
+        if _image_already_linked(http, wikidata_api, ua, qid, prop, filename):
+            return jsonify({'error': msg('image-already-linked', prop)}), 409
+    except Exception:
+        return jsonify({'error': msg('api-check-failed')}), 502
 
     try:
         csrf_token = _get_csrf_token(http, wikidata_api)
@@ -283,7 +318,7 @@ def set_image(qid):
                 'action':   'wbcreateclaim',
                 'entity':   qid,
                 'snaktype': 'value',
-                'property': 'P18',
+                'property': prop,
                 'value':    json.dumps(filename),
                 'token':    csrf_token,
                 'format':   'json',
@@ -301,7 +336,7 @@ def set_image(qid):
 
 
 # ---------------------------------------------------------------------------
-# Endpoint: upload foto ke Commons + tambah P18 ke Wikidata
+# Endpoint: upload foto ke Commons + tambah ke properti gambar Wikidata (bawaan P18)
 # ---------------------------------------------------------------------------
 
 @api.route('/item/<qid>/upload-photo', methods=['POST'])
@@ -316,9 +351,12 @@ def upload_photo(qid):
     filename  = request.form.get('filename', '').strip()
     caption   = request.form.get('caption', '').strip()
     author    = session.get('user', {}).get('username', 'Unknown')
+    prop      = _image_prop(request.form.get('property'))
 
     if not filename:
         return jsonify({'error': msg('upload-filename-required')}), 400
+    if not prop:
+        return jsonify({'error': msg('api-image-prop-invalid')}), 400
 
     # Pastikan ekstensi ada
     ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'jpg'
@@ -395,7 +433,7 @@ def upload_photo(qid):
             'warning': msg('api-upload-p18-failed', e),
         })
 
-    # 5. Tambah klaim P18 ke Wikidata
+    # 5. Tambah klaim gambar ke Wikidata
     try:
         wd = oauth.post(
             wikidata_api,
@@ -403,7 +441,7 @@ def upload_photo(qid):
                 'action':   'wbcreateclaim',
                 'entity':   qid,
                 'snaktype': 'value',
-                'property': 'P18',
+                'property': prop,
                 'value':    json.dumps(final_filename),
                 'token':    csrf_wikidata,
                 'format':   'json',

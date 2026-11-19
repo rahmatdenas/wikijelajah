@@ -96,9 +96,6 @@
     {% else %}
     {{ lang_switcher }}
     <a href="{{ url_for('auth.login', next=request.full_path) }}" class="top-nav-btn top-nav-btn--login">
-      <svg class="wikimedia-w" viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true">
-        <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1.5 14.5l-3-8h1.5l1.8 5.2 1.8-5.2h1.5l1.8 5.2 1.8-5.2H18l-3 8-2-5.5-2 5.5z"/>
-      </svg>
       {{ msg('nav-login') }}
     </a>
     {% endif %}

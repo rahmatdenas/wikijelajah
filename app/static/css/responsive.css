@@ -85,11 +85,10 @@
   .top-nav-auth { gap: var(--space-1); }
   .top-nav-user-link, .top-nav-btn { padding: 0 var(--space-2); gap: var(--space-1); }
 
-  /* Ikon kecil sulit dikenali: Panduan cukup "?" besar, logo W di tombol Masuk dibuang */
+  /* Ikon kecil sulit dikenali: Panduan cukup "?" besar */
   .top-nav-help svg { display: none; }
   .top-nav-help-q { display: inline; font-size: 18px; font-weight: 800; line-height: 1; }
   .top-nav-help { min-width: 32px; justify-content: center; }
-  .wikimedia-w { display: none; }
 
   /* Tombol profil cukup ikon; nama pengguna pindah ke dalam menunya */
   .top-nav-username { display: none; }

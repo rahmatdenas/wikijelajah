@@ -1063,6 +1063,8 @@ function renderDetail(qid) {
         </div>
       </section>
 
+      <section class="detail-section hidden" id="detail-gallery-${escHtml(qid)}"></section>
+
     </div>`;
 
   const backToResults = () => { mapShowShape(null); showSection('hasil'); revealCurrentItem(); };
@@ -1242,6 +1244,7 @@ function renderDetailProps(qid) {
   el.innerHTML = renderDynPropsHtml(qid, r._detail, State.params?.klasterNama || '');
   const links = $(`detail-links-${qid}`);
   if (links) links.innerHTML = detailLinksHtml(qid);
+  renderDetailGallery(qid);
   attachPropEditHandlers(qid, el);
   attachAddProperty(qid, el);
   el.querySelector('.detail-all')?.addEventListener('toggle', e => renderAllData(qid, e.currentTarget), { once: true });
@@ -1382,6 +1385,115 @@ function attachAddProperty(qid, container) {
 // Properti yang boleh diberi nilai tambahan walau sudah terisi (server: MULTI_VALUE_PROPS di api/routes.py):
 // terbuat dari, teknik pembuatan, bagian dari, status warisan budaya
 const PROP_MULTI_VALUE = new Set(['P186', 'P2079', 'P361', 'P1435']);
+
+// Properti gambar untuk "Data Gambar" dan pilihan jenis gambar saat unggah / tautkan
+// (sama dengan IMAGE_PROPS di api/routes.py)
+const IMAGE_PROPS = ['P18', 'P5775', 'P1442', 'P1766', 'P1801', 'P3451', 'P9721', 'P12565', 'P8592'];
+
+/**
+ * Data Gambar: gambar lain milik butir (P18 selain foto utama + properti gambar lain yang ada isinya),
+ * diakhiri kotak "Tambah data foto". Jenis yang tidak ada isinya tidak ditampilkan.
+ */
+function renderDetailGallery(qid) {
+  const el = $(`detail-gallery-${qid}`);
+  const r  = State.records[qid];
+  if (!el || !r?._detail) return;
+
+  const items = IMAGE_PROPS.flatMap(pid => (r._detail.claims[pid] || [])
+    .filter(c => c.rank !== 'deprecated' && typeof c.mainsnak.datavalue?.value === 'string')
+    .map(c => ({ pid, file: c.mainsnak.datavalue.value })))
+    .filter(it => !(it.pid === 'P18' && sameCommonsFile(it.file, r.imageFilename)));
+
+  const addBox = APP_USER
+    ? `<div class="detail-gallery-add">
+         <span>${escHtml(msg('detail-gallery-add'))}</span>
+         <button type="button" class="btn btn--primary btn--sm js-gallery-upload" title="${escHtml(msg('detail-upload-photo'))}">↑ ${escHtml(msg('detail-gallery-upload'))}</button>
+         <button type="button" class="btn btn--secondary btn--sm js-gallery-link" title="${escHtml(msg('detail-link-photo'))}">↗ ${escHtml(msg('detail-gallery-link'))}</button>
+       </div>`
+    : `<div class="detail-gallery-add">
+         <span>${escHtml(msg('detail-gallery-add'))}</span>
+         <a href="${loginUrl()}" class="btn btn--secondary btn--sm" title="${escHtml(msg('detail-login-to-upload'))}">${escHtml(msg('nav-login'))}</a>
+       </div>`;
+
+  el.innerHTML = `
+    <div class="detail-section-head"><h3>${escHtml(msg('detail-gallery-title'))}</h3></div>
+    <ul class="detail-gallery">
+      ${items.map(it => `<li>
+        <button type="button" class="detail-gallery-item js-gallery-open" data-file="${escHtml(it.file)}"
+                title="${escHtml(it.file)}">
+          <img src="${commonsFileUrl(it.file, 240)}" alt="" loading="lazy">
+          <span class="detail-gallery-label">${escHtml(msg(`image-prop-${it.pid}`))}</span>
+        </button>
+      </li>`).join('')}
+      <li>${addBox}</li>
+    </ul>`;
+  el.classList.remove('hidden');
+
+  el.querySelectorAll('.js-gallery-open').forEach(btn =>
+    btn.addEventListener('click', () => openLightbox(btn.dataset.file)));
+  // Dari Data Gambar: jenis gambar dipilih sendiri (tanpa bawaan)
+  el.querySelector('.js-gallery-upload')?.addEventListener('click', () => openUploadModal(qid, r.title, ''));
+  el.querySelector('.js-gallery-link')?.addEventListener('click', () => openLinkPhotoModal(qid, r.title, ''));
+}
+
+/** Nama berkas Commons sama? Garis bawah = spasi, huruf pertama tidak peka besar-kecil. */
+function sameCommonsFile(a, b) {
+  const norm = f => { const n = (f || '').replace(/_/g, ' ').trim(); return n.charAt(0).toUpperCase() + n.slice(1); };
+  return !!a && !!b && norm(a) === norm(b);
+}
+
+/** Berkas sudah tertaut ke properti ini di butir (menurut data detail yang sudah dimuat)? */
+function imageAlreadyLinked(qid, prop, filename) {
+  return (State.records[qid]?._detail?.claims?.[prop] || [])
+    .some(c => sameCommonsFile(c.mainsnak.datavalue?.value, filename));
+}
+
+// Jenis gambar tanpa batasan jenis subjek di Wikidata (boleh untuk butir apa pun): ditawarkan
+// sambil menunggu pengecekan, atau bila pengecekan gagal
+const IMAGE_PROPS_ANY = ['P18', 'P1801', 'P12565', 'P8592'];
+
+/** Isi pilihan "Jenis gambar"; `selected` tetap terpilih bila masih ada di daftar. */
+function fillImagePropSelect(select, pids, selected = '') {
+  if (!select) return;
+  select.innerHTML = `<option value="">— ${escHtml(msg('image-type-choose'))} —</option>`
+    + pids.map(pid => `<option value="${pid}">${escHtml(msg(`image-prop-${pid}`))}</option>`).join('');
+  select.value = pids.includes(selected) ? selected : '';
+}
+
+/**
+ * Pilihan "Jenis gambar" untuk butir: hanya yang sesuai batasan Wikidata (mis. "Makam" hanya untuk
+ * tokoh). Sementara pengecekan berjalan, yang ditawarkan hanya jenis yang boleh untuk butir apa pun.
+ */
+async function prepareImagePropSelect(select, qid, selected) {
+  const r = State.records[qid];
+  fillImagePropSelect(select, r?._imageProps || IMAGE_PROPS_ANY, selected);
+  if (!r || r._imageProps) return;
+  try {
+    r._imageProps = await fetchAllowedImageProps(qid, IMAGE_PROPS, State.abortCtrl?.signal);
+    // Modal mungkin sudah ditutup atau beralih ke butir lain
+    if (select.closest('.upload-modal-overlay')?._qid === qid) {
+      fillImagePropSelect(select, r._imageProps, select.value || selected);
+    }
+  } catch (err) {
+    if (err.name !== 'AbortError') console.warn('Image property check failed:', err);
+  }
+}
+
+/** Jenis gambar yang dipilih di modal (null = belum dipilih). */
+function chosenImageProp(select) {
+  return select.value || null;
+}
+
+/** Setelah gambar tersimpan: perbarui foto utama bila perlu, lalu muat ulang detail (Data Gambar ikut). */
+function afterImageSaved(qid, prop, filename) {
+  const r = State.records[qid];
+  if (!r) return;
+  if (prop === 'P18' && !r.imageFilename) {
+    r.imageFilename = filename;
+    mapRefreshMarkerIcon(r);
+  }
+  r._detail = null;  // klaim berubah: ambil ulang dari Wikidata
+}
 
 /** Klaim yang belum tampil di Data Utama (Tipe = P31, atribut skema, properti tambahan). */
 function otherClaims(qid) {
@@ -2098,6 +2210,7 @@ function initLinkPhotoModal() {
   const previewImg = $('link-photo-preview-img');
   const previewName= $('link-photo-preview-name');
   const submitBtn  = $('link-photo-btn-submit');
+  const propSelect = $('link-photo-prop');
 
   const closeModal = () => {
     modal.classList.add('hidden');
@@ -2137,17 +2250,22 @@ function initLinkPhotoModal() {
     const qid   = modal._qid;
     const fname = parseCommonsFilename(input.value);
     if (!fname || !qid) return;
+    const prop = chosenImageProp(propSelect);
+    if (!prop) return setLinkPhotoStatus('error', msg('image-type-required'));
+    // Cek cepat di sisi tampilan; server tetap memeriksa ulang ke Wikidata
+    if (imageAlreadyLinked(qid, prop, fname))
+      return setLinkPhotoStatus('error', msg('image-already-linked', msg(`image-prop-${prop}`)));
 
     submitBtn.disabled = true;
     submitBtn.classList.add('loading');
     $('link-photo-btn-label').textContent = msg('link-photo-linking');
-    setLinkPhotoStatus('info', msg('link-photo-adding'));
+    setLinkPhotoStatus('info', msg('link-photo-adding', msg(`image-prop-${prop}`)));
 
     try {
       const res  = await fetch(`/api/item/${qid}/set-image`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: fname }),
+        body: JSON.stringify({ filename: fname, property: prop }),
       });
       const data = await res.json();
 
@@ -2159,11 +2277,8 @@ function initLinkPhotoModal() {
         return;
       }
 
-      if (State.records[qid]) {
-        State.records[qid].imageFilename = data.filename;
-        mapRefreshMarkerIcon(State.records[qid]);
-      }
-      setLinkPhotoStatus('success', `✓ ${msg('link-photo-success')}`);
+      afterImageSaved(qid, prop, data.filename);
+      setLinkPhotoStatus('success', `✓ ${msg('link-photo-success', msg(`image-prop-${prop}`))}`);
       $('link-photo-btn-label').textContent = msg('button-done');
 
       setTimeout(() => { closeModal(); renderDetail(qid); }, 1500);
@@ -2177,11 +2292,13 @@ function initLinkPhotoModal() {
   });
 }
 
-function openLinkPhotoModal(qid, title) {
+/** `prop`: jenis gambar terpilih saat modal dibuka — P18 dari kotak foto utama, kosong dari Data Gambar. */
+function openLinkPhotoModal(qid, title, prop = 'P18') {
   const modal = $('link-photo-modal');
   if (!modal) return;
   modal._qid   = qid;
   modal._title = title || '';
+  prepareImagePropSelect($('link-photo-prop'), qid, prop);
   $('link-photo-input').value = '';
   $('link-photo-preview-area').classList.add('hidden');
   $('link-photo-status').classList.add('hidden');
@@ -2202,6 +2319,7 @@ function initUploadModal() {
   const dropLabel = $('upload-drop-label');
   const submitBtn = $('upload-btn-submit');
   if (!modal) return;
+  const propSelect = $('upload-prop');
 
   // Tutup modal
   const closeModal = () => {
@@ -2273,6 +2391,8 @@ function initUploadModal() {
 
     if (!file)     return setUploadStatus('error', msg('upload-choose-photo'));
     if (!filename) return setUploadStatus('error', msg('upload-filename-required'));
+    const prop = chosenImageProp(propSelect);
+    if (!prop)     return setUploadStatus('error', msg('image-type-required'));
 
     submitBtn.disabled = true;
     submitBtn.classList.add('loading');
@@ -2283,6 +2403,7 @@ function initUploadModal() {
     fd.append('file',     file);
     fd.append('filename', filename);
     fd.append('caption',  caption);
+    fd.append('property', prop);
 
     try {
       const res  = await fetch(`/api/item/${qid}/upload-photo`, { method: 'POST', body: fd });
@@ -2297,15 +2418,12 @@ function initUploadModal() {
       }
 
       // Berhasil — perbarui state dan re-render detail
-      if (State.records[qid]) {
-        State.records[qid].imageFilename = data.filename;
-        mapRefreshMarkerIcon(State.records[qid]);
-      }
+      afterImageSaved(qid, prop, data.filename);
 
       if (data.warning) {
         setUploadStatus('warning', `✓ ${msg('upload-success-warning', data.warning)}`);
       } else {
-        setUploadStatus('success', `✓ ${msg('upload-success')}`);
+        setUploadStatus('success', `✓ ${msg('upload-success', msg(`image-prop-${prop}`))}`);
       }
 
       $('upload-btn-label').textContent = msg('button-done');
@@ -2325,11 +2443,13 @@ function initUploadModal() {
   });
 }
 
-function openUploadModal(qid, title) {
+/** `prop`: jenis gambar terpilih saat modal dibuka — P18 dari kotak foto utama, kosong dari Data Gambar. */
+function openUploadModal(qid, title, prop = 'P18') {
   const modal = $('upload-modal');
   if (!modal) return;
   modal._qid   = qid;
   modal._title = title || '';
+  prepareImagePropSelect($('upload-prop'), qid, prop);
   $('upload-caption').value  = title || '';
   $('upload-filename').value = '';
   $('upload-status').classList.add('hidden');
