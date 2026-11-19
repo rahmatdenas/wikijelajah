@@ -163,7 +163,9 @@ function mapRefreshMarkerIcon(record) {
   if (record.marker.options.icon !== icon) record.marker.setIcon(icon);
 }
 
-function mapAddMarkers(markers) {
+/** Ganti seluruh marker di peta dengan `markers` (mis. hanya butir yang lolos saringan). */
+function mapSetMarkers(markers) {
+  _cluster.clearLayers();
   if (markers.length) _cluster.addLayers(markers);
 }
 

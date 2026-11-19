@@ -469,8 +469,8 @@ async function startSearch() {
     State.sortedIds   = cached.sortedIds;
     setMediaReady();
     finishBuildResults();
-    const markers = Object.values(State.records).map(r => mapBuildMarker(r)).filter(Boolean);
-    mapAddMarkers(markers);
+    Object.values(State.records).forEach(r => mapBuildMarker(r));
+    syncMapMarkers({ force: true });
     mapFitAll();
     setLoadingStatus(null);
     return;
@@ -641,6 +641,7 @@ function resetHasilUI() {
   DOM.btnArtikel?.classList.add('loading');
   DOM.btnGambar?.classList.add('loading');
   State.filter = { wilayah: 'all', search: '', image: null, article: null };
+  _mapSig = '';
   updateFilterButtons();
 }
 
@@ -696,15 +697,14 @@ async function loadCoordinates(qids, signal, { fitMap = false } = {}) {
     stopSignal: startStep(),
     onProgress: pct => setLoadingStatus(msg('loading-coordinates', klasterLabel, pct)),
   });
-  const markers = [];
   Object.entries(res.coords).forEach(([q, c]) => {
     const r = State.records[q];
     if (!r || r.lat !== undefined) return;
     r.lat = c.lat; r.lon = c.lon;
-    const m = mapBuildMarker(r);
-    if (m) markers.push(m);
+    mapBuildMarker(r);
   });
-  if (markers.length) { mapAddMarkers(markers); if (fitMap) mapFitAll(); }
+  syncMapMarkers({ force: true });
+  if (fitMap) mapFitAll();
   setLoadingStatus(null);
 
   State.missing.coords = res.missing.map(stripWd);
@@ -736,7 +736,10 @@ async function loadMediaBackground(qids, signal) {
     setMediaReady();
     setLoadingStatus(null);
     // Coba lagi saat saringan Foto/Artikel aktif → butir yang baru termuat ikut tersaring
-    if (wasLoaded && (State.filter.image || State.filter.article)) applyFilter();
+    if (wasLoaded && (State.filter.image || State.filter.article)) {
+      applyFilter();
+      syncMapMarkers({ force: true });
+    }
 
     // Butir yang tidak termuat tetap `undefined` (belum diketahui), bukan null (memang tidak ada)
     State.missing.media = res.missing.map(stripWd).filter(q => State.records[q]?.imageFilename === undefined);
@@ -801,6 +804,26 @@ function applyFilter() {
   renderList();
   updateSearchPlaceholder();
   updateFilterButtons();
+  // Peta menyusul sedikit kemudian: mengetik di kotak cari tidak membangun ulang marker per huruf
+  clearTimeout(_mapSyncTimer);
+  _mapSyncTimer = setTimeout(syncMapMarkers, 150);
+}
+
+let _mapSyncTimer = null;
+let _mapSig = '';
+
+/**
+ * Peta hanya menampilkan butir yang lolos saringan, sama dengan daftar.
+ * Dilewati bila saringan dan jumlah marker tidak berubah (mis. hanya urutan yang berganti);
+ * `force` bila isinya bisa berubah dengan jumlah yang sama (marker baru, media baru termuat).
+ */
+function syncMapMarkers({ force = false } = {}) {
+  clearTimeout(_mapSyncTimer);
+  const markers = State.visibleIds.map(id => State.records[id]?.marker).filter(Boolean);
+  const sig = `${JSON.stringify(State.filter)}|${markers.length}`;
+  if (!force && sig === _mapSig) return;
+  _mapSig = sig;
+  mapSetMarkers(markers);
 }
 
 /** Render ulang daftar dari awal; butir berikutnya ditambahkan saat pengguna menggulir ke bawah. */
@@ -1947,6 +1970,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // Filter hasil
   DOM.filterWilayah?.addEventListener('change', e => {
     State.filter.wilayah = e.target.value; applyFilter();
+    syncMapMarkers();
+    mapFitAll();
   });
   DOM.filterUrut?.addEventListener('change', e => applySort(e.target.value));
   DOM.searchInput?.addEventListener('input', e => {
@@ -1958,6 +1983,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (DOM.filterWilayah) DOM.filterWilayah.value = 'all';
     if (DOM.searchInput) DOM.searchInput.value = '';
     applyFilter();
+    syncMapMarkers();
+    mapFitAll();
   });
   // Artikel / Foto: Ada → Tanpa → lepas; keduanya bisa aktif bersamaan
   [[DOM.btnArtikel, 'article'], [DOM.btnGambar, 'image']].forEach(([btn, key]) => btn?.addEventListener('click', () => {
