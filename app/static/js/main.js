@@ -1835,6 +1835,14 @@ function initBottomSheet() {
     snapTo(ahead.reduce((a, b) => Math.abs(stops[b] - y) < Math.abs(stops[a] - y) ? b : a));
   }
 
+  // Setelah panel dipindah lewat pegangan / usapan, "click" bawaan sentuhan menyusul di titik jari, dan
+  // karena panel sudah bergeser, yang kena adalah isi panel di titik itu (mis. foto → lightbox). Telan sekali.
+  function swallowNextClick() {
+    const block = e => { e.stopPropagation(); e.preventDefault(); };
+    document.addEventListener('click', block, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', block, { capture: true }), 400);
+  }
+
   // Tombol di baris navigasi: pengguna awam belum tahu panel bisa ditarik untuk melihat peta
   document.addEventListener('click', e => {
     if (e.target.closest('.js-sheet-toggle')) _setSheetOpen(panel.dataset.sheet !== 'open');
@@ -1860,6 +1868,7 @@ function initBottomSheet() {
     if (grab.moved) settle(grab.from);
     else snapTo(grab.from === 'open' ? 'peek' : 'open');
     grab = null;
+    swallowNextClick();
   });
 
   // Usap isi panel: ke bawah saat gulirannya sudah mentok di atas → turun satu posisi;
@@ -1892,7 +1901,7 @@ function initBottomSheet() {
   }, { passive: false });
 
   const endSwipe = () => {
-    if (swipe?.mode === 'drag') settle(swipe.from);
+    if (swipe?.mode === 'drag') { settle(swipe.from); swallowNextClick(); }
     swipe = null;
   };
   panel.addEventListener('touchend', endSwipe);
