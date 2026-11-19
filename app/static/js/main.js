@@ -862,7 +862,13 @@ function revealCurrentItem() {
   const i = State.currentIndex;
   if (i < 0 || !_listBuilt) return;
   if (i >= State.shown) appendItems(i + 1 - State.shown);
-  DOM.hasilList?.querySelector(`[data-index="${i}"]`)?.scrollIntoView({ block: 'center' });
+  const item = DOM.hasilList?.querySelector(`[data-index="${i}"]`);
+  const box  = DOM.sections.hasil;
+  if (!item || !box) return;
+  // Gulir daftarnya saja. scrollIntoView ikut menggulir pembungkus ber-overflow:hidden (#app-body) bila
+  // butir tidak bisa ditengahkan, sehingga panel HP bergeser dan tidak bisa diusap tutup lagi.
+  const offset = item.getBoundingClientRect().top - box.getBoundingClientRect().top;
+  box.scrollTop += offset - (box.clientHeight - item.offsetHeight) / 2;
 }
 
 function renderListItem(qid, index) {
