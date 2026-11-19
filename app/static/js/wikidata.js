@@ -280,10 +280,12 @@ function buildItemsQuery(p) {
 // FETCH UTILITIES
 // ---------------------------------------------------------------------------
 
-// Batas waktu per permintaan SPARQL. WQS sendiri menghentikan query setelah 60 detik, jadi
-// data utama diberi sedikit lebih; koordinat & media (query VALUES kecil) cukup 40 detik.
-const WD_TIMEOUT_MAIN  = 70000;
-const WD_TIMEOUT_BATCH = 40000;
+// Batas waktu menunggu jawaban (header HTTP) WQS; unduhan & parsing JSON tidak ikut dihitung.
+// Data utama mengikuti batas WQS sendiri (60 detik) dan tidak diulang bila timeout: query daftar
+// yang berat memang bisa butuh 30–55 detik. Koordinat & media (query VALUES kecil) biasanya
+// selesai dalam hitungan detik, jadi 30 detik tanpa jawaban berarti server sedang sibuk → diulang.
+const WD_TIMEOUT_MAIN  = 60000;
+const WD_TIMEOUT_BATCH = 30000;
 // Batch koordinat/media yang berjalan bersamaan (WQS membatasi query bersamaan per IP)
 const WD_PARALLEL = 4;
 
@@ -299,7 +301,7 @@ class SparqlError extends Error {
 }
 
 async function sparqlPost(query, signal, timeout = WD_TIMEOUT_MAIN) {
-  // Timer milik permintaan ini saja dan selalu dibersihkan di finally
+  // Timer milik permintaan ini saja: dimatikan begitu header tiba, dan selalu dibersihkan di finally
   const timeoutCtrl = new AbortController();
   const timer = setTimeout(() => timeoutCtrl.abort(), timeout);
   try {
@@ -313,6 +315,9 @@ async function sparqlPost(query, signal, timeout = WD_TIMEOUT_MAIN) {
       body: 'format=json&query=' + encodeURIComponent(query),
       signal: anySignal([signal, timeoutCtrl.signal]),
     });
+    // WQS sudah menjawab: unduhan isi tidak dibatasi timer (internet lambat tidak membuang hasil
+    // yang sudah jadi). Tombol Hentikan / pencarian baru tetap bisa membatalkannya lewat `signal`.
+    clearTimeout(timer);
     if (!resp.ok) {
       const body = await resp.text().catch(() => '');
       if (resp.status === 429) {
@@ -323,10 +328,18 @@ async function sparqlPost(query, signal, timeout = WD_TIMEOUT_MAIN) {
       if (body.includes('TimeoutException')) throw new SparqlError('timeout', msg('sparql-timeout'), resp.status);
       throw new SparqlError('http', `SPARQL HTTP ${resp.status}`, resp.status);
     }
-    const data = await resp.json();
-    return data.results.bindings;
+    // WQS kadang menjawab 200 lalu terhenti di tengah aliran hasil karena batas 60 detiknya
+    // sendiri; JSON yang terpotong itu dilaporkan sebagai timeout, bukan galat parsing mentah.
+    const text = await resp.text();
+    try {
+      return JSON.parse(text).results.bindings;
+    } catch {
+      throw new SparqlError('timeout', msg('sparql-timeout'), resp.status);
+    }
   } catch (err) {
-    if (timeoutCtrl.signal.aborted && !signal?.aborted) throw new SparqlError('timeout', msg('sparql-timeout'));
+    // Dibatalkan pengguna (juga saat isi sedang diunduh) → selalu AbortError, bukan galat jaringan
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (timeoutCtrl.signal.aborted) throw new SparqlError('timeout', msg('sparql-timeout'));
     if (err instanceof TypeError) throw new SparqlError('network', err.message);
     throw err;
   } finally {
@@ -345,16 +358,18 @@ function _sleep(ms, signal) {
 
 /**
  * Kirim query dengan percobaan ulang untuk galat sementara (429, 5xx, jaringan).
- * Timeout tidak diulang: query yang sama hampir pasti timeout lagi.
+ * Timeout hanya diulang bila `retryTimeout` (batch kecil koordinat/media); query data utama
+ * yang timeout hampir pasti timeout lagi.
  */
-async function sparqlWithRetry(query, signal, { maxRetry = 3, timeout = WD_TIMEOUT_MAIN } = {}) {
+async function sparqlWithRetry(query, signal, { maxRetry = 3, timeout = WD_TIMEOUT_MAIN, retryTimeout = false } = {}) {
   for (let i = 1; i <= maxRetry; i++) {
     if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
     try {
       return await sparqlPost(query, signal, timeout);
     } catch (err) {
       if (err.name === 'AbortError') throw err;
-      const retryable = err.kind === 'rate' || err.kind === 'network' || (err.kind === 'http' && err.status >= 500);
+      const retryable = err.kind === 'rate' || err.kind === 'network' || (err.kind === 'http' && err.status >= 500)
+        || (err.kind === 'timeout' && retryTimeout);
       if (!retryable || i === maxRetry) throw err;
       const wait = err.kind === 'rate' ? Math.min(err.retryAfter * 1000 || 5000 * i, 60000) : 1500 * i;
       await _sleep(wait, signal);
@@ -479,7 +494,7 @@ async function fetchCoordinates(qids, klasterNama, propLokasi, signal, opts = {}
     } else {
       q = _T_COORDS_DIRECT.replace('<QIDS>', chunk.join(' '));
     }
-    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH });
+    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH, retryTimeout: true });
     const lokasi = {};
     rows.forEach(r => {
       const qid = r.siteQid.value;
@@ -511,7 +526,7 @@ async function fetchMedia(qids, signal, opts = {}) {
 
   const status = await runBatches(chunkArray(qids, WD_MEDIA_BATCH), async (chunk, reqSignal) => {
     const q = _T_MEDIA.replace('<QIDS>', chunk.join(' '));
-    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH });
+    const rows = await sparqlWithRetry(q, reqSignal, { timeout: WD_TIMEOUT_BATCH, retryTimeout: true });
     rows.forEach(r => {
       const qid = r.siteQid.value.includes('entity/')
         ? r.siteQid.value.split('entity/')[1]
