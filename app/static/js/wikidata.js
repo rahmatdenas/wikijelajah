@@ -1073,23 +1073,34 @@ function fetchImagePropClasses(pids) {
   return _imagePropClassesP;
 }
 
+// Cakupan dari sisi aplikasi: batasan Wikidata ada yang sangat luas (mis. "gerbang" juga boleh untuk
+// peristiwa, "langit malam" untuk banyak hal) atau tidak ada sama sekali ("dari udara", "pembangunan",
+// "plakat"), sehingga tarian, hidangan, atau kain ikut ditawari. Selain P18, jenis gambar hanya untuk
+// tempat / bangunan; makam & plakat juga untuk tokoh.
+const _PLACE = ['Q2221906', 'Q811979'];  // lokasi geografis, struktur arsitektur
+const IMAGE_PROP_SCOPE = {
+  P5775: _PLACE, P1766: _PLACE, P3451: _PLACE, P9721: _PLACE, P8592: _PLACE,
+  P12565: ['Q811979'],  // pembangunan: hanya bangunan / struktur, bukan pulau atau gunung
+  P1801: [..._PLACE, 'Q5'],
+  P1442: ['Q5'],  // manusia
+};
+
 /**
- * Properti gambar yang sesuai untuk butir: tanpa batasan, atau butir termasuk (turunan) salah satu
- * kelas yang diizinkan. Mis. "gambar makam" (P1442) hanya untuk manusia, bukan untuk masjid.
+ * Properti gambar yang sesuai untuk butir: memenuhi batasan jenis subjek di Wikidata (bila ada) dan
+ * cakupan aplikasi (IMAGE_PROP_SCOPE). Mis. "gambar makam" (P1442) hanya untuk tokoh, bukan masjid;
+ * tarian atau hidangan hanya P18.
  * @returns {Promise<string[]>} urutan sama dengan `pids`
  */
 async function fetchAllowedImageProps(qid, pids, signal) {
   const byProp = await fetchImagePropClasses(pids);
-  const classes = [...new Set(Object.values(byProp).flat())];
-  let matched = new Set();
-  if (classes.length) {
-    const rows = await sparqlWithRetry(`SELECT DISTINCT ?c WHERE {
-      VALUES ?c { ${classes.map(c => `wd:${c}`).join(' ')} }
-      { wd:${qid} wdt:P31/wdt:P279* ?c } UNION { wd:${qid} wdt:P279* ?c }
-    }`, signal, { maxRetry: 1, timeout: WD_TIMEOUT_BATCH });
-    matched = new Set(rows.map(r => r.c.value.split('/').pop()));
-  }
-  return pids.filter(pid => !byProp[pid] || byProp[pid].some(c => matched.has(c)));
+  const classes = [...new Set([...Object.values(byProp), ...Object.values(IMAGE_PROP_SCOPE)].flat())];
+  const rows = await sparqlWithRetry(`SELECT DISTINCT ?c WHERE {
+    VALUES ?c { ${classes.map(c => `wd:${c}`).join(' ')} }
+    { wd:${qid} wdt:P31/wdt:P279* ?c } UNION { wd:${qid} wdt:P279* ?c }
+  }`, signal, { maxRetry: 2, timeout: WD_TIMEOUT_BATCH });
+  const matched = new Set(rows.map(r => r.c.value.split('/').pop()));
+  const fits = list => !list || list.some(c => matched.has(c));
+  return pids.filter(pid => fits(byProp[pid]) && fits(IMAGE_PROP_SCOPE[pid]));
 }
 
 /** Saran butir Wikidata untuk input atribut bertipe item. */

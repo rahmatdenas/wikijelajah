@@ -1464,9 +1464,8 @@ function loadImageProps(qid) {
   return r._imagePropsP;
 }
 
-// Jenis gambar tanpa batasan jenis subjek di Wikidata (boleh untuk butir apa pun): ditawarkan
-// sambil menunggu pengecekan, atau bila pengecekan gagal
-const IMAGE_PROPS_ANY = ['P18', 'P1801', 'P12565', 'P8592'];
+// Jenis gambar yang cocok untuk butir apa pun: ditawarkan sambil menunggu pengecekan, atau bila gagal
+const IMAGE_PROPS_ANY = ['P18'];
 
 /** Isi pilihan "Jenis gambar"; `selected` tetap terpilih bila masih ada di daftar. */
 function fillImagePropSelect(select, pids, selected = '') {
@@ -1477,8 +1476,8 @@ function fillImagePropSelect(select, pids, selected = '') {
 }
 
 /**
- * Pilihan "Jenis gambar" untuk butir: hanya yang sesuai batasan Wikidata (mis. "Makam" hanya untuk
- * tokoh). Sementara pengecekan berjalan, yang ditawarkan hanya jenis yang boleh untuk butir apa pun.
+ * Pilihan "Jenis gambar" untuk butir: hanya yang sesuai (fetchAllowedImageProps; mis. "Makam" hanya
+ * untuk tokoh, tarian hanya P18). Sementara pengecekan berjalan, yang ditawarkan hanya P18.
  */
 async function prepareImagePropSelect(select, qid, selected) {
   const r = State.records[qid];
