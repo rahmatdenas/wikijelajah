@@ -3,7 +3,6 @@ import re
 import time
 from datetime import date
 from functools import wraps
-import requests
 from flask import current_app, jsonify, request, session
 from requests_oauthlib import OAuth2Session
 from . import api
@@ -73,38 +72,6 @@ def _login_expired(e):
 
 def _ua():
     return current_app.config.get('WIKIMEDIA_USER_AGENT', 'WikiJelajah/1.0')
-
-
-# ---------------------------------------------------------------------------
-# Endpoint: ringkasan item Wikidata
-# ---------------------------------------------------------------------------
-
-@api.route('/item/<qid>/summary')
-def item_summary(qid):
-    params = {
-        'action': 'wbgetentities',
-        'ids': qid.upper(),
-        'languages': 'id|en',
-        'props': 'labels|descriptions|claims|sitelinks/urls',
-        'sitefilter': 'idwiki',
-        'format': 'json',
-    }
-    resp = requests.get(current_app.config['WIKIMEDIA_API_BASE'], params=params, timeout=10)
-    resp.raise_for_status()
-    data = resp.json()
-
-    entity = data.get('entities', {}).get(qid.upper(), {})
-    if not entity:
-        return jsonify({'error': msg('item-not-found')}), 404
-
-    return jsonify({
-        'qid': qid.upper(),
-        'label': (entity.get('labels', {}).get('id') or entity.get('labels', {}).get('en', {})).get('value', ''),
-        'description': (entity.get('descriptions', {}).get('id') or entity.get('descriptions', {}).get('en', {})).get('value', ''),
-        'wikipedia_url': next(
-            (sl.get('url') for sl in entity.get('sitelinks', {}).values()), None
-        ),
-    })
 
 
 # ---------------------------------------------------------------------------
