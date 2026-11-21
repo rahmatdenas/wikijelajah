@@ -320,6 +320,7 @@
 	"upload-duplicate-deleted": "Foto ini pernah diunggah ke Commons sebagai \"$1\" dan sudah dihapus. Periksa alasannya di Commons sebelum mengunggah lagi.",
 	"upload-name-exists": "Berkas bernama \"$1\" sudah ada di Commons. Gunakan nama file lain agar berkas yang ada tidak tertimpa.",
 	"upload-name-deleted": "Berkas bernama \"$1\" pernah dihapus dari Commons. Gunakan nama file lain.",
+	"upload-name-blacklisted": "Commons tidak menerima nama berkas ini ($1). Hindari ekstensi ganda (mis. .jpg.jpeg) dan nama umum seperti IMG_1234.",
 	"upload-link-existing": "Tautkan berkas yang ada",
 	"pk-login-title": "Perkaya Data dengan AI",
 	"pk-login-intro": "Temukan nilai atribut Wikidata yang masih kosong dengan bantuan AI, periksa sumbernya, lalu simpan ke Wikidata atas nama akun Anda. Masuk terlebih dahulu untuk memakai fitur ini.",

@@ -320,6 +320,7 @@
 	"upload-duplicate-deleted": "This photo was uploaded to Commons before as \"$1\" and was deleted. Check the reason on Commons before uploading it again.",
 	"upload-name-exists": "A file named \"$1\" already exists on Commons. Choose a different file name so the existing file is not replaced.",
 	"upload-name-deleted": "A file named \"$1\" was deleted from Commons before. Choose a different file name.",
+	"upload-name-blacklisted": "Commons does not accept this file name ($1). Avoid double extensions (such as .jpg.jpeg) and generic names such as IMG_1234.",
 	"upload-link-existing": "Link existing file",
 	"pk-login-title": "Enrich data with AI",
 	"pk-login-intro": "Find values for empty Wikidata attributes with the help of AI, check the sources, then save them to Wikidata under your own account. Log in first to use this feature.",

@@ -290,13 +290,47 @@ def _upload_warning_response(warnings, filename):
         return jsonify({'error': msg('upload-duplicate-deleted', _commons_name(warnings['duplicate-archive'])),
                         'code': 'duplicate-archive'}), 409
     if any(k in warnings for k in UPLOAD_NAME_TAKEN):
-        return jsonify({'error': msg('upload-name-exists', _commons_name(filename)), 'code': 'exists'}), 409
+        # exists-normalized berisi nama berkas yang sudah ada (mis. .jpg untuk ketikan .jpeg)
+        existing = warnings.get('exists-normalized') or filename
+        existing = existing if isinstance(existing, str) else filename
+        return jsonify({'error': msg('upload-name-exists', _commons_name(existing)), 'code': 'exists'}), 409
     if 'was-deleted' in warnings:
         return jsonify({'error': msg('upload-name-deleted', _commons_name(filename)), 'code': 'exists'}), 409
     other = set(warnings) - UPLOAD_SAFE_WARNINGS
     if other:
         return jsonify({'error': msg('api-upload-rejected', ', '.join(sorted(other)))}), 409
     return None
+
+
+# Ekstensi yang sama bagi Commons (.jpeg = .jpg) dan ekstensi gambar yang dikenali di nama ketikan
+EXT_ALIASES = {'jpeg': 'jpg', 'jpe': 'jpg', 'tif': 'tiff'}
+IMAGE_EXTS  = {'jpg', 'jpeg', 'jpe', 'png', 'webp', 'gif', 'tif', 'tiff', 'heic', 'heif'}
+
+
+def _upload_filename(name, device_filename):
+    """Nama berkas Commons dengan tepat satu ekstensi, sesuai jenis file dari perangkat.
+
+    Nama ketikan berakhiran .jpg untuk file .jpeg tetap .jpg; ekstensi gambar lain yang tidak cocok
+    diganti (bukan ditambah) — Commons menolak ekstensi ganda seperti Nama.jpg.jpeg.
+    """
+    ext = device_filename.rsplit('.', 1)[-1].lower() if '.' in device_filename else 'jpg'
+    stem, dot, typed = name.strip().rpartition('.')
+    if dot and EXT_ALIASES.get(typed.lower(), typed.lower()) == EXT_ALIASES.get(ext, ext):
+        pass
+    elif dot and typed.lower() in IMAGE_EXTS:
+        name = f'{stem}.{ext}'
+    else:
+        name = f'{name.strip()}.{ext}'
+    return name.replace(' ', '_')  # standar Commons
+
+
+def _commons_upload_error(error):
+    """Pesan galat unggah Commons; galat TitleBlacklist datang sebagai kunci pesan ⧼…⧽ yang tak terbaca."""
+    info = error.get('info', '')
+    if error.get('code', '').startswith('titleblacklist') or 'titleblacklist' in info:
+        key = re.sub(r'^⧼|⧽$', '', info).replace('titleblacklist-custom-', '')
+        return msg('upload-name-blacklisted', key)
+    return info or msg('upload-failed')
 
 
 def _shot_date(value):
@@ -393,13 +427,7 @@ def upload_photo(qid):
     if not prop:
         return jsonify({'error': msg('api-image-prop-invalid')}), 400
 
-    # Pastikan ekstensi ada
-    ext = file.filename.rsplit('.', 1)[-1].lower() if '.' in file.filename else 'jpg'
-    if not filename.lower().endswith(('.' + ext,)):
-        filename = f'{filename}.{ext}'
-
-    # Ganti spasi dengan underscore (standar Commons)
-    filename = filename.replace(' ', '_')
+    filename = _upload_filename(filename, file.filename)
 
     commons_api  = 'https://commons.wikimedia.org/w/api.php'
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
@@ -449,7 +477,7 @@ def upload_photo(qid):
         return jsonify({'error': msg('api-upload-failed', e)}), 500
 
     if 'error' in up:
-        return jsonify({'error': up['error'].get('info', msg('upload-failed'))}), 500
+        return jsonify({'error': _commons_upload_error(up['error'])}), 500
 
     upload_info = up.get('upload', {})
     if upload_info.get('result') == 'Warning':
@@ -468,7 +496,7 @@ def upload_photo(qid):
         except Exception as e:
             return jsonify({'error': msg('api-upload-failed', e)}), 500
         if 'error' in up:
-            return jsonify({'error': up['error'].get('info', msg('upload-failed'))}), 500
+            return jsonify({'error': _commons_upload_error(up['error'])}), 500
         upload_info = up.get('upload', {})
 
     if upload_info.get('result') != 'Success':
