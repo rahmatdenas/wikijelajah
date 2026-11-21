@@ -324,7 +324,7 @@
 	"upload-categories": "Kategori (opsional)",
 	"upload-categories-search": "Cari kategori Commons…",
 	"upload-categories-hint": "Pilih kategori yang paling spesifik; kategori induknya tidak perlu ditambahkan. Paling banyak $1.",
-	"upload-categories-suggested": "Saran:",
+	"upload-categories-suggested": "Saran untuk butir ini",
 	"upload-categories-none": "Tidak ada kategori yang cocok.",
 	"upload-category-remove": "Hapus kategori $1",
 	"upload-category-invalid": "Nama kategori tidak sah: $1",

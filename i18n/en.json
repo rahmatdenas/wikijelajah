@@ -324,7 +324,7 @@
 	"upload-categories": "Categories (optional)",
 	"upload-categories-search": "Search Commons categories…",
 	"upload-categories-hint": "Choose the most specific category; its parent categories are not needed. At most $1.",
-	"upload-categories-suggested": "Suggestions:",
+	"upload-categories-suggested": "Suggested for this item",
 	"upload-categories-none": "No matching category.",
 	"upload-category-remove": "Remove category $1",
 	"upload-category-invalid": "Invalid category name: $1",

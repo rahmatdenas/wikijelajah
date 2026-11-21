@@ -95,11 +95,10 @@
           <label class="form-label" for="upload-caption">{{ msg('upload-caption') }}</label>
           <input type="text" id="upload-caption" class="form-input" placeholder="{{ msg('upload-caption-placeholder') }}">
         </div>
-        {# Kategori Commons (opsional): hanya yang dipilih dari saran (P373) atau hasil pencarian #}
+        {# Kategori Commons (opsional): dari saran (P373, tampil di dropdown saat kolom kosong difokus) atau pencarian #}
         <div class="form-group">
           <label class="form-label" for="upload-cat-input">{{ msg('upload-categories') }}</label>
           <div id="upload-cat-chips" class="cat-chips hidden"></div>
-          <div id="upload-cat-suggest" class="cat-suggest hidden"></div>
           <div class="prop-edit-field cat-search">
             <input type="text" id="upload-cat-input" class="form-input" autocomplete="off"
                    placeholder="{{ msg('upload-categories-search') }}"

@@ -324,7 +324,7 @@
 	"upload-categories": "Label of the Commons categories field in the upload dialog.",
 	"upload-categories-search": "Placeholder of the category search field in the upload dialog.",
 	"upload-categories-hint": "Hint below the category field in the upload dialog.\n\nParameters:\n* $1 – maximum number of categories",
-	"upload-categories-suggested": "Label before the suggested categories (the Commons category of the item and of its location).",
+	"upload-categories-suggested": "Heading in the category search dropdown, above the suggested categories (the Commons category of the item and of its location). Shown when the empty search field is focused.",
 	"upload-categories-none": "Shown in the category search results when nothing matches.",
 	"upload-category-remove": "Accessible label of the remove (×) button of a chosen category.\n\nParameters:\n* $1 – category name",
 	"upload-category-invalid": "Error from the server when a category name contains forbidden characters.\n\nParameters:\n* $1 – category name",

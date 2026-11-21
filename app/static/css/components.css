@@ -717,9 +717,9 @@ select option { color: var(--color-text); }
 
 .upload-form-fields { display: flex; flex-direction: column; gap: var(--space-4); }
 
-/* Kategori Commons di modal unggah: terpilih (chip ×), saran P373 (+), pencarian */
-.cat-chips, .cat-suggest { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--space-2); }
-.cat-chip, .cat-suggest-btn {
+/* Kategori Commons di modal unggah: terpilih (chip ×), lalu pencarian (saran P373 di dropdown) */
+.cat-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--space-2); }
+.cat-chip {
   display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
   padding: 3px var(--space-2); border-radius: var(--radius-full);
   font-size: var(--text-sm); font-weight: 600; line-height: 1.4; overflow-wrap: anywhere;
@@ -730,11 +730,10 @@ select option { color: var(--color-text); }
   font-size: 16px; line-height: 1; cursor: pointer; opacity: 0.7;
 }
 .cat-chip-remove:hover { opacity: 1; }
-.cat-suggest-btn {
-  border: 1px dashed var(--color-accent-muted); background: var(--color-surface);
-  color: var(--color-primary); cursor: pointer;
+.cat-results-head {
+  padding: 4px var(--space-2) 2px; color: var(--color-gray-500);
+  font-size: var(--text-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em;
 }
-.cat-suggest-btn:hover { background: var(--color-accent-bg); border-style: solid; }
 .cat-search { display: block; }
 .cat-search .prop-suggest { width: 100%; max-width: none; }
 

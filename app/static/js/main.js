@@ -2548,20 +2548,12 @@ const _catSuggestCache = new Map();  // qid → Promise<string[]>
 
 function renderUploadCategories() {
   const chips = $('upload-cat-chips');
-  const sugg  = $('upload-cat-suggest');
   const full  = UploadCats.chosen.length >= MAX_UPLOAD_CATEGORIES;
 
   chips.innerHTML = UploadCats.chosen.map(c => `
     <span class="cat-chip">${escHtml(c)}<button type="button" class="cat-chip-remove" data-cat="${escHtml(c)}"
       aria-label="${escHtml(msg('upload-category-remove', c))}">×</button></span>`).join('');
   chips.classList.toggle('hidden', !UploadCats.chosen.length);
-
-  const open = UploadCats.suggested.filter(c => !UploadCats.chosen.includes(c));
-  sugg.innerHTML = open.length
-    ? `<span class="upload-hint">${escHtml(msg('upload-categories-suggested'))}</span>` +
-      open.map(c => `<button type="button" class="cat-suggest-btn" data-cat="${escHtml(c)}"${full ? ' disabled' : ''}>+ ${escHtml(c)}</button>`).join('')
-    : '';
-  sugg.classList.toggle('hidden', !open.length);
 
   const input = $('upload-cat-input');
   input.disabled = full;
@@ -2590,8 +2582,24 @@ function resetUploadCategories(qid) {
   _catSuggestCache.get(qid).then(list => {
     if (UploadCats.qid !== qid) return;  // modal sudah ditutup / butir lain
     UploadCats.suggested = list;
-    renderUploadCategories();
+    // Saran datang saat kolom sudah difokus dan masih kosong: langsung tampilkan
+    if (document.activeElement === $('upload-cat-input')) showUploadCategorySuggestions();
   });
+}
+
+/**
+ * Kolom kategori difokus dan masih kosong: dropdown berisi saran untuk butir (P373 butir & wilayah).
+ * Tidak ada saran → dropdown tidak dibuka.
+ */
+function showUploadCategorySuggestions() {
+  const input = $('upload-cat-input');
+  const list  = $('upload-cat-results');
+  const open  = UploadCats.suggested.filter(c => !UploadCats.chosen.includes(c));
+  if (input.value.trim() || input.disabled || !open.length) return;
+  list.innerHTML = `<li class="cat-results-head">${escHtml(msg('upload-categories-suggested'))}</li>` +
+    open.map(c => `<li class="prop-suggest-item" role="option" data-cat="${escHtml(c)}">
+      <span class="prop-suggest-label">${escHtml(c)}</span></li>`).join('');
+  list.classList.remove('hidden');
 }
 
 function initUploadCategories() {
@@ -2607,10 +2615,8 @@ function initUploadCategories() {
     UploadCats.chosen = UploadCats.chosen.filter(c => c !== btn.dataset.cat);
     renderUploadCategories();
   });
-  $('upload-cat-suggest').addEventListener('click', e => {
-    const btn = e.target.closest('.cat-suggest-btn');
-    if (btn) addUploadCategory(btn.dataset.cat);
-  });
+  input.addEventListener('focus', showUploadCategorySuggestions);
+  input.addEventListener('click', showUploadCategorySuggestions);  // sudah fokus, dropdown tertutup (Esc / pilih)
 
   const pick = li => {
     addUploadCategory(li.dataset.cat);
@@ -2622,6 +2628,7 @@ function initUploadCategories() {
   input.addEventListener('input', () => {
     clearTimeout(timer);
     const term = input.value.trim();
+    if (!term) { list.classList.add('hidden'); showUploadCategorySuggestions(); return; }
     if (term.length < 2) { list.classList.add('hidden'); return; }
 
     timer = setTimeout(async () => {
