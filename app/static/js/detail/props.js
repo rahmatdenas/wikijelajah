@@ -3,7 +3,7 @@
 // Atribut di panel detail: skema kategori, tambah data lain, galeri, edit properti.
 
 // ---------------------------------------------------------------------------
-// DETAIL ATRIBUT PER KATEGORI (skema: SKEMA_KATEGORI di wikidata.js)
+// DETAIL ATRIBUT PER KATEGORI (skema: SKEMA_KATEGORI di wikidata/schema.js)
 // ---------------------------------------------------------------------------
 const INPUT_PLACEHOLDER = {
   item:     msg('input-placeholder-item'),

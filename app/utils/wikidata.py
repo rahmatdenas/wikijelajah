@@ -135,7 +135,7 @@ WILAYAH_LUAR_NEGERI = {
 
 # Kategori data untuk dropdown — setiap butir adalah (value, klaster, kunci_pesan, attr_dict).
 # klaster = nama kategori dalam bahasa Indonesia yang dipakai sebagai kunci internal
-# (SKEMA_KATEGORI di wikidata.js, kolom kategori di DB Perkaya) — jangan diterjemahkan;
+# (SKEMA_KATEGORI di static/js/wikidata/schema.js, kolom kategori di DB Perkaya) — jangan diterjemahkan;
 # teks tampilannya diambil dari kunci_pesan (i18n/*.json), begitu pula nama grup.
 # attr_dict boleh kosong {} atau berisi data-* attributes tambahan
 KATEGORI_DATA = [

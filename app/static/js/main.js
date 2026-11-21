@@ -3,7 +3,7 @@
 /* ==========================================================================
    main.js — Inisialisasi halaman Jelajah: memasang semua event listener.
    Kodenya tersebar per fitur di search/, detail/, layout/, dan upload/
-   (dimuat lebih dulu di index.html). wikidata.js menyediakan semua fungsi
+   (dimuat lebih dulu di index.html). wikidata/ menyediakan semua fungsi
    data; map.js menyediakan semua peta.
    ========================================================================== */
 

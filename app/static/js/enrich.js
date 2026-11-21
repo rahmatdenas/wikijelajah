@@ -3,7 +3,7 @@
 /* ==========================================================================
    enrich.js — Halaman Perkaya Data (/enrich): cek kelengkapan atribut, cari nilai
    yang kosong dengan AI, validasi kandidat, lalu simpan ke Wikidata.
-   Butuh: ui.js (helper UI), wikidata.js (query & skema kategori).
+   Butuh: ui.js (helper UI), wikidata/ (query & skema kategori).
    ========================================================================== */
 
 const PK_MAX_ITEMS     = 1000;  // batas butir yang dicek sekaligus

@@ -216,7 +216,7 @@ function enhanceSearchableSelect(select, placeholder = msg('combo-placeholder'))
 
 // ---------------------------------------------------------------------------
 // SARAN BUTIR WIKIDATA untuk input bertipe item (butuh searchWikidataItems
-// dari wikidata.js). Pilihan disimpan di input.dataset.qid / .label.
+// dari wikidata/props.js). Pilihan disimpan di input.dataset.qid / .label.
 // ---------------------------------------------------------------------------
 function attachItemSuggest(input, list) {
   let timer = null;

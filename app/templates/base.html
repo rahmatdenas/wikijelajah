@@ -229,7 +229,14 @@
 <script src="{{ url_for('static', filename='js/vendor/banana-i18n.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ui.js') }}"></script>
 <script src="{{ url_for('static', filename='js/ai.js') }}"></script>
-<script src="{{ url_for('static', filename='js/wikidata.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wikidata/base.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wikidata/sparql.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wikidata/fetch.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wikidata/items.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wikidata/commons.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wikidata/schema.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wikidata/detail.js') }}"></script>
+<script src="{{ url_for('static', filename='js/wikidata/props.js') }}"></script>
 <script src="{{ url_for('static', filename='js/map.js') }}"></script>
 
 {% block scripts %}{% endblock %}

@@ -90,7 +90,7 @@ function initSettings() {
 
 /**
  * Cari nilai satu atribut untuk satu butir.
- * item: { qid, label, description, kategori, lokasi }; attr: entri skema (wikidata.js).
+ * item: { qid, label, description, kategori, lokasi }; attr: entri skema (wikidata/schema.js).
  * Hasil: { ok, status, data } — data berupa daftar kandidat bila ok, atau { error, fatal }.
  */
 async function aiSearch(item, attr, settings = loadSettings()) {
