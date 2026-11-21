@@ -27,7 +27,7 @@
     border-radius: var(--radius-xl) var(--radius-xl) 0 0;
     box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.22);
     overflow: hidden;
-    /* Saat tertutup: terlihat sampai bawah tombol filter hasil (SHEET_PEEK di main.js) */
+    /* Saat tertutup: terlihat sampai bawah tombol filter hasil (SHEET_PEEK di layout/sheet.js) */
     transform: translateY(calc(100% - 212px));
     transition: transform var(--transition-slow);
   }

@@ -53,7 +53,7 @@
   <div class="lightbox-content">
     <img id="lightbox-img" src="" alt="" class="lightbox-img">
     <button class="lightbox-close" aria-label="{{ msg('button-close') }}">&times;</button>
-    {# Judul berkas (buka di Commons) + fotografer & lisensi, diisi main.js #}
+    {# Judul berkas (buka di Commons) + fotografer & lisensi, diisi detail/detail.js #}
     <div class="lightbox-info">
       <a id="lightbox-title" class="lightbox-title" href="#" target="_blank" rel="noopener" title="{{ msg('lightbox-open-commons') }}"></a>
       <p id="lightbox-credit" class="lightbox-credit"></p>
@@ -87,7 +87,7 @@
       </div>
 
       <div class="upload-form-fields">
-        {# Pilihannya diisi main.js (IMAGE_PROPS); bawaan P18 dari kotak foto utama, kosong dari Data Gambar #}
+        {# Pilihannya diisi detail/props.js (IMAGE_PROPS); bawaan P18 dari kotak foto utama, kosong dari Data Gambar #}
         <div class="form-group" id="upload-prop-group">
           <label class="form-label" for="upload-prop">{{ msg('image-type') }}</label>
           <select id="upload-prop" class="form-select"></select>
@@ -113,7 +113,7 @@
           </div>
           <small class="upload-hint">{{ msg('upload-categories-hint', 5) }}</small>
         </div>
-        {# Hanya tampil bila foto punya GPS di EXIF (main.js showUploadLocation) #}
+        {# Hanya tampil bila foto punya GPS di EXIF (upload/metadata.js showUploadLocation) #}
         <div class="form-group hidden" id="upload-location-group">
           <label class="upload-check">
             <input type="checkbox" id="upload-location-check" checked>

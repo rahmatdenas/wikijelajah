@@ -135,7 +135,7 @@ def update_description(qid):
 # datatype: item | quantity | time | url | string
 # ---------------------------------------------------------------------------
 
-# Properti yang boleh diberi nilai tambahan walau sudah terisi (sama dengan PROP_MULTI_VALUE di main.js):
+# Properti yang boleh diberi nilai tambahan walau sudah terisi (sama dengan PROP_MULTI_VALUE di detail/props.js):
 # terbuat dari, teknik pembuatan, bagian dari, status warisan budaya
 MULTI_VALUE_PROPS = {'P186', 'P2079', 'P361', 'P1435'}
 
@@ -217,7 +217,7 @@ def add_claim(qid):
 
 
 # ---------------------------------------------------------------------------
-# Properti gambar yang boleh diisi lewat unggah / tautkan (sama dengan IMAGE_PROPS di main.js)
+# Properti gambar yang boleh diisi lewat unggah / tautkan (sama dengan IMAGE_PROPS di detail/props.js)
 IMAGE_PROPS = {'P18', 'P5775', 'P1442', 'P1766', 'P1801', 'P3451', 'P9721', 'P12565', 'P8592'}
 
 

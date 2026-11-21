@@ -162,7 +162,7 @@
         <div class="loader loader--center"></div>
         <p class="loading-title" id="loading-center-text">{{ msg('loading-data') }}</p>
         <p class="loading-subtitle" id="loading-center-sub"></p>
-        {# Muncul setelah data mencapai CUKUPKAN_MIN_DATA (main.js) #}
+        {# Muncul setelah data mencapai CUKUPKAN_MIN_DATA (search/state.js) #}
         <div id="cukupkan-wrap" class="hidden">
           <button id="btn-cukupkan" type="button" class="btn btn--secondary btn--sm btn-cukupkan">{{ msg('stop-search') }}</button>
           <p class="loading-subtitle">{{ msg('stop-search-hint') }}</p>
@@ -173,7 +173,7 @@
         <p>{{ msg('results-none-hint') }}</p>
       </div>
       <ol id="hasil-list" class="result-list"></ol>
-      {# Penanda bawah daftar: butir berikutnya dimuat saat ini terlihat (main.js: appendItems) #}
+      {# Penanda bawah daftar: butir berikutnya dimuat saat ini terlihat (search/results.js: appendItems) #}
       <p id="hasil-end" class="hasil-end hidden" aria-live="polite"></p>
     </div>
   </section>
@@ -203,5 +203,16 @@
 
 
 {% block scripts %}
+<script src="{{ url_for('static', filename='js/search/state.js') }}"></script>
+<script src="{{ url_for('static', filename='js/search/form.js') }}"></script>
+<script src="{{ url_for('static', filename='js/search/run.js') }}"></script>
+<script src="{{ url_for('static', filename='js/search/results.js') }}"></script>
+<script src="{{ url_for('static', filename='js/detail/detail.js') }}"></script>
+<script src="{{ url_for('static', filename='js/detail/props.js') }}"></script>
+<script src="{{ url_for('static', filename='js/detail/ai.js') }}"></script>
+<script src="{{ url_for('static', filename='js/layout/sheet.js') }}"></script>
+<script src="{{ url_for('static', filename='js/upload/link-photo.js') }}"></script>
+<script src="{{ url_for('static', filename='js/upload/modal.js') }}"></script>
+<script src="{{ url_for('static', filename='js/upload/metadata.js') }}"></script>
 <script src="{{ url_for('static', filename='js/main.js') }}"></script>
 {% endblock %}
