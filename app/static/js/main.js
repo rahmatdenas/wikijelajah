@@ -2355,6 +2355,8 @@ function initUploadModal() {
   const closeModal = () => {
     modal.classList.add('hidden');
     fileInput.value = '';
+    if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+    preview.removeAttribute('src');
     preview.classList.add('hidden');
     dropLabel.classList.remove('hidden');
     $('upload-filename').value = '';
@@ -2385,10 +2387,9 @@ function initUploadModal() {
   $('upload-btn-cancel')?.addEventListener('click',  closeModal);
   modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
 
-  // File picker — klik drop zone
-  dropZone.addEventListener('click', e => {
-    if (!e.target.closest('.upload-preview-img')) fileInput.click();
-  });
+  // File picker: input transparan menutupi seluruh drop zone, jadi ketukan sudah membuka pemilih.
+  // Jangan panggil fileInput.click() lagi — di Safari iOS pemilih terbuka dua kali dan foto
+  // yang dipilih (galeri / file / kamera) hilang tanpa event change.
 
   // Drag & drop
   dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
@@ -2397,7 +2398,9 @@ function initUploadModal() {
     e.preventDefault();
     dropZone.classList.remove('drag-over');
     const f = e.dataTransfer.files[0];
-    if (f) handleFileSelect(f);
+    if (!f) return;
+    fileInput.files = e.dataTransfer.files;  // tombol Upload membaca fileInput.files
+    handleFileSelect(f);
   });
 
   fileInput.addEventListener('change', () => {
@@ -2408,13 +2411,11 @@ function initUploadModal() {
     if (!file.type.startsWith('image/')) return setUploadStatus('error', msg('upload-images-only'));
     if (file.size > 10 * 1024 * 1024) return setUploadStatus('error', msg('upload-too-large', 10));
 
-    const reader = new FileReader();
-    reader.onload = e => {
-      preview.src = e.target.result;
-      preview.classList.remove('hidden');
-      dropLabel.classList.add('hidden');
-    };
-    reader.readAsDataURL(file);
+    // Object URL, bukan data URL: foto HP 5–10 MB tidak perlu disalin jadi teks base64 di memori
+    if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+    preview.src = URL.createObjectURL(file);
+    preview.classList.remove('hidden');
+    dropLabel.classList.add('hidden');
     linkExistingBtn.classList.add('hidden');
     $('upload-status').classList.add('hidden');
 
