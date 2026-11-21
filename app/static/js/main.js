@@ -2363,6 +2363,8 @@ function initUploadModal() {
     $('upload-btn-label').textContent = msg('upload-submit');
     linkExistingBtn.classList.add('hidden');
     modal._qid = null;
+    modal._pick = null;
+    modal._shotDate = '';
   };
 
   // Foto yang sama sudah ada di Commons: pindah ke modal Tautkan dengan nama berkas itu
@@ -2397,7 +2399,7 @@ function initUploadModal() {
     if (fileInput.files[0]) handleFileSelect(fileInput.files[0]);
   });
 
-  function handleFileSelect(file) {
+  async function handleFileSelect(file) {
     if (!file.type.startsWith('image/')) return setUploadStatus('error', msg('upload-images-only'));
     if (file.size > 10 * 1024 * 1024) return setUploadStatus('error', msg('upload-too-large', 10));
 
@@ -2408,17 +2410,30 @@ function initUploadModal() {
       dropLabel.classList.add('hidden');
     };
     reader.readAsDataURL(file);
-
-    // Auto-isi nama file dari judul item
-    const title = modal._title || '';
-    const ext   = file.name.split('.').pop();
-    const safe  = title.replace(/[^a-zA-Z0-9À-ɏ\s\-]/g, '').trim().replace(/\s+/g, '_');
-    $('upload-filename').value = safe ? `${safe}.${ext}` : file.name.replace(/\s+/g, '_');
-    $('upload-caption').value  = $('upload-caption').value || title;
-
-    submitBtn.disabled = false;
     linkExistingBtn.classList.add('hidden');
     $('upload-status').classList.add('hidden');
+
+    // Auto-isi nama file: judul butir + tanggal foto (EXIF → tanggal file → hari ini)
+    const pick = modal._pick = {};  // pilihan foto terbaru; pilihan lama yang masih berjalan diabaikan
+    const title = modal._title || '';
+    const ext   = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
+    const safe  = title.replace(/[^a-zA-Z0-9À-ɏ\s\-]/g, '').trim().replace(/\s+/g, '_');
+    $('upload-caption').value = $('upload-caption').value || title;
+
+    const shotDate = await exifDate(file);
+    if (modal._pick !== pick) return;
+    modal._shotDate = shotDate;
+    const day  = shotDate || isoDate(new Date(file.lastModified || Date.now()));
+    const base = safe ? `${safe}_${day}` : file.name.replace(/\.[^.]*$/, '').trim().replace(/\s+/g, '_');
+    const suggested = `${base}.${ext}`;
+    $('upload-filename').value = suggested;
+    submitBtn.disabled = false;
+
+    // Nama sudah dipakai di Commons? Ganti dengan _2, _3, … — kecuali pengguna sudah mengubahnya
+    try {
+      const free = await fetchFreeCommonsName(base, ext);
+      if (modal._pick === pick && free && $('upload-filename').value === suggested) $('upload-filename').value = free;
+    } catch { /* gagal mengecek: server tetap menolak nama yang sudah dipakai */ }
   }
 
   // Submit
@@ -2443,6 +2458,7 @@ function initUploadModal() {
     fd.append('filename', filename);
     fd.append('caption',  caption);
     fd.append('property', prop);
+    fd.append('date',     modal._shotDate || '');
 
     try {
       const res  = await fetch(`/api/item/${qid}/upload-photo`, { method: 'POST', body: fd });
@@ -2503,6 +2519,52 @@ function openUploadModal(qid, title, prop = 'P18') {
   $('upload-status').classList.add('hidden');
   $('upload-btn-submit').disabled = true;
   modal.classList.remove('hidden');
+}
+
+/** Tanggal lokal sebagai YYYY-MM-DD. */
+function isoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+/** Tanggal pemotretan (YYYY-MM-DD) dari EXIF foto JPEG; '' bila tidak ada atau tidak terbaca. */
+async function exifDate(file) {
+  if (!/jpe?g$/i.test(file.type)) return '';
+  try {
+    const v = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
+    if (v.getUint16(0) !== 0xFFD8) return '';
+    // Cari segmen APP1 "Exif" di antara segmen-segmen awal JPEG
+    for (let off = 2; off + 10 < v.byteLength; off += 2 + v.getUint16(off + 2)) {
+      const marker = v.getUint16(off);
+      if (marker === 0xFFE1 && v.getUint32(off + 4) === 0x45786966) return exifTiffDate(v, off + 10);
+      if ((marker & 0xFF00) !== 0xFF00 || marker === 0xFFDA) break;  // awal data gambar: tidak ada EXIF
+    }
+  } catch { /* berkas rusak / terpotong */ }
+  return '';
+}
+
+/** DateTimeOriginal (0x9003) → DateTimeDigitized (0x9004) → DateTime (0x0132) dari blok TIFF EXIF. */
+function exifTiffDate(v, tiff) {
+  const le  = v.getUint16(tiff) === 0x4949;  // "II" = little endian
+  const u16 = o => v.getUint16(tiff + o, le);
+  const u32 = o => v.getUint32(tiff + o, le);
+  const tags = ifd => {
+    const out = {};
+    for (let i = 0, n = u16(ifd); i < n; i++) {
+      const e = ifd + 2 + i * 12;
+      out[u16(e)] = { count: u32(e + 4), value: u32(e + 8) };
+    }
+    return out;
+  };
+  const ascii = t => t && t.count > 4
+    ? String.fromCharCode(...new Uint8Array(v.buffer, v.byteOffset + tiff + t.value, t.count - 1)) : '';
+
+  const ifd0 = tags(u32(4));
+  const exif = ifd0[0x8769] ? tags(ifd0[0x8769].value) : {};
+  for (const t of [exif[0x9003], exif[0x9004], ifd0[0x0132]]) {
+    const m = ascii(t).match(/^(\d{4}):(\d{2}):(\d{2})/);
+    if (m && +m[1] >= 1840 && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31) return `${m[1]}-${m[2]}-${m[3]}`;
+  }
+  return '';
 }
 
 function setUploadStatus(type, msg) {

@@ -610,6 +610,34 @@ async function fetchWikipediaExcerpt(title, signal) {
 }
 
 // ---------------------------------------------------------------------------
+// NAMA BERKAS COMMONS YANG MASIH KOSONG (untuk unggah)
+// ---------------------------------------------------------------------------
+
+/**
+ * Nama berkas pertama yang belum dipakai di Commons: `base.ext`, lalu `base_2.ext` … `base_10.ext`.
+ * Ekstensi yang hanya beda huruf besar-kecil (.jpg / .JPG) dianggap sudah dipakai, sama dengan
+ * peringatan "exists-normalized" Commons.
+ * @returns {Promise<string>} '' bila semuanya sudah dipakai
+ */
+async function fetchFreeCommonsName(base, ext, signal) {
+  const names = [`${base}.${ext}`, ...Array.from({ length: 9 }, (_, i) => `${base}_${i + 2}.${ext}`)];
+  const variants = n => [...new Set([n, n.replace(/\.[^.]+$/, e => e.toLowerCase()), n.replace(/\.[^.]+$/, e => e.toUpperCase())])];
+  const norm = t => { const n = t.replace(/^File:/, '').replace(/_/g, ' ').trim(); return n.charAt(0).toUpperCase() + n.slice(1); };
+
+  const url = new URL(WD_COMMONS_API);
+  Object.entries({
+    action: 'query', format: 'json', formatversion: 2, origin: '*',
+    titles: names.flatMap(variants).map(n => 'File:' + n).join('|'),
+  }).forEach(([k, v]) => url.searchParams.append(k, v));
+
+  const resp = await fetch(url, { signal });
+  if (!resp.ok) throw new Error('Commons HTTP ' + resp.status);
+  const pages = (await resp.json()).query?.pages || [];
+  const taken = new Set(pages.filter(p => !p.missing && !p.invalid).map(p => norm(p.title)));
+  return names.find(n => !variants(n).some(v => taken.has(norm(v)))) || '';
+}
+
+// ---------------------------------------------------------------------------
 // COMMONS IMAGE METADATA (caption/lisensi)
 // ---------------------------------------------------------------------------
 

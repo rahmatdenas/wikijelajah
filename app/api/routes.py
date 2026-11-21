@@ -299,6 +299,16 @@ def _upload_warning_response(warnings, filename):
     return None
 
 
+def _shot_date(value):
+    """Tanggal foto YYYY-MM-DD dari formulir; hari ini bila kosong, tidak sah, atau di masa depan."""
+    today = date.today()
+    try:
+        shot = date.fromisoformat((value or '').strip())
+    except ValueError:
+        return today.isoformat()
+    return shot.isoformat() if shot <= today else today.isoformat()
+
+
 # Endpoint: tautkan file Commons yang sudah ada ke properti gambar Wikidata (bawaan P18)
 # ---------------------------------------------------------------------------
 
@@ -404,13 +414,12 @@ def upload_photo(qid):
     except Exception as e:
         return jsonify({'error': msg('api-token-failed', e)}), 500
 
-    # 2. Wikitext halaman file
-    today    = date.today().isoformat()
+    # 2. Wikitext halaman file — tanggal pemotretan (EXIF, dikirim tampilan) bila ada, selain itu hari ini
     wikitext = (
         f"=={{{{int:filedesc}}}}==\n"
         f"{{{{Information\n"
         f"|description={{{{{get_lang()}|1={caption or filename}}}}}\n"
-        f"|date={today}\n"
+        f"|date={_shot_date(request.form.get('date'))}\n"
         f"|source={{{{own}}}}\n"
         f"|author=[[User:{author}|{author}]]\n"
         f"}}}}\n\n"
