@@ -274,6 +274,31 @@ def _image_already_linked(http, wikidata_api, ua, qid, prop, filename):
     return any(_commons_name(c.get('mainsnak', {}).get('datavalue', {}).get('value')) == target for c in claims)
 
 
+# Peringatan unggah Commons yang boleh dilewati; peringatan lain menghentikan unggahan
+# (mis. "exists" berarti file orang lain akan tertimpa, "duplicate" berarti foto yang sama sudah ada)
+UPLOAD_SAFE_WARNINGS = {'badfilename', 'large-file'}
+UPLOAD_NAME_TAKEN    = ('exists', 'exists-normalized', 'page-exists', 'nochange', 'duplicateversions')
+
+
+def _upload_warning_response(warnings, filename):
+    """Respons 409 untuk peringatan yang menghentikan unggahan; None bila semua peringatan ringan."""
+    if warnings.get('duplicate'):
+        existing = _commons_name(warnings['duplicate'][0])
+        return jsonify({'error': msg('upload-duplicate', existing), 'code': 'duplicate',
+                        'existing': existing}), 409
+    if warnings.get('duplicate-archive'):
+        return jsonify({'error': msg('upload-duplicate-deleted', _commons_name(warnings['duplicate-archive'])),
+                        'code': 'duplicate-archive'}), 409
+    if any(k in warnings for k in UPLOAD_NAME_TAKEN):
+        return jsonify({'error': msg('upload-name-exists', _commons_name(filename)), 'code': 'exists'}), 409
+    if 'was-deleted' in warnings:
+        return jsonify({'error': msg('upload-name-deleted', _commons_name(filename)), 'code': 'exists'}), 409
+    other = set(warnings) - UPLOAD_SAFE_WARNINGS
+    if other:
+        return jsonify({'error': msg('api-upload-rejected', ', '.join(sorted(other)))}), 409
+    return None
+
+
 # Endpoint: tautkan file Commons yang sudah ada ke properti gambar Wikidata (bawaan P18)
 # ---------------------------------------------------------------------------
 
@@ -394,19 +419,20 @@ def upload_photo(qid):
         f"[[Category:Uploaded with WikiJelajah]]"
     )
 
-    # 3. Upload ke Commons
+    # 3. Upload ke Commons — tanpa ignorewarnings: bila ada peringatan, Commons menyimpan file
+    #    sementara (filekey) dan kita putuskan apakah boleh dilanjutkan
+    upload_data = {
+        'action':   'upload',
+        'filename': filename,
+        'text':     wikitext,
+        'comment':  f'Upload via WikiJelajah untuk {qid}',
+        'token':    csrf_commons,
+        'format':   'json',
+    }
     try:
         up = oauth.post(
             commons_api,
-            data={
-                'action':         'upload',
-                'filename':       filename,
-                'text':           wikitext,
-                'comment':        f'Upload via WikiJelajah untuk {qid}',
-                'token':          csrf_commons,
-                'format':         'json',
-                'ignorewarnings': '1',
-            },
+            data=upload_data,
             files={'file': (filename, file.stream, file.content_type)},
             headers={'User-Agent': ua},
         ).json()
@@ -417,7 +443,26 @@ def upload_photo(qid):
         return jsonify({'error': up['error'].get('info', msg('upload-failed'))}), 500
 
     upload_info = up.get('upload', {})
-    if upload_info.get('result') not in ('Success', 'Warning'):
+    if upload_info.get('result') == 'Warning':
+        warnings = upload_info.get('warnings', {})
+        blocked = _upload_warning_response(warnings, filename)
+        if blocked:
+            return blocked
+        # Hanya peringatan ringan: lanjutkan dari file sementara
+        try:
+            up = oauth.post(commons_api, data={
+                **upload_data,
+                'filename':       warnings.get('badfilename', filename),
+                'filekey':        upload_info.get('filekey'),
+                'ignorewarnings': '1',
+            }, headers={'User-Agent': ua}).json()
+        except Exception as e:
+            return jsonify({'error': msg('api-upload-failed', e)}), 500
+        if 'error' in up:
+            return jsonify({'error': up['error'].get('info', msg('upload-failed'))}), 500
+        upload_info = up.get('upload', {})
+
+    if upload_info.get('result') != 'Success':
         return jsonify({'error': msg('api-upload-rejected', up)}), 500
 
     # Nama file final yang diterima Commons (bisa berbeda karena normalisasi)

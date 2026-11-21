@@ -2315,19 +2315,24 @@ function initLinkPhotoModal() {
   });
 }
 
-/** `prop`: jenis gambar terpilih saat modal dibuka — P18 dari kotak foto utama, kosong dari Data Gambar. */
-function openLinkPhotoModal(qid, title, prop = 'P18') {
+/**
+ * `prop`: jenis gambar terpilih saat modal dibuka — P18 dari kotak foto utama, kosong dari Data Gambar.
+ * `filename`: nama berkas yang langsung diisi (mis. dari unggahan yang ternyata duplikat).
+ */
+function openLinkPhotoModal(qid, title, prop = 'P18', filename = '') {
   const modal = $('link-photo-modal');
   if (!modal) return;
   modal._qid   = qid;
   modal._title = title || '';
   prepareImagePropSelect($('link-photo-prop'), qid, prop);
-  $('link-photo-input').value = '';
+  const input = $('link-photo-input');
+  input.value = filename;
   $('link-photo-preview-area').classList.add('hidden');
   $('link-photo-status').classList.add('hidden');
   $('link-photo-btn-submit').disabled = true;
   modal.classList.remove('hidden');
-  setTimeout(() => $('link-photo-input').focus(), 100);
+  if (filename) input.dispatchEvent(new Event('input'));  // tampilkan pratinjau
+  setTimeout(() => input.focus(), 100);
 }
 
 // ---------------------------------------------------------------------------
@@ -2356,8 +2361,18 @@ function initUploadModal() {
     submitBtn.disabled = true;
     submitBtn.classList.remove('loading');
     $('upload-btn-label').textContent = msg('upload-submit');
+    linkExistingBtn.classList.add('hidden');
     modal._qid = null;
   };
+
+  // Foto yang sama sudah ada di Commons: pindah ke modal Tautkan dengan nama berkas itu
+  const linkExistingBtn = $('upload-btn-link-existing');
+  linkExistingBtn.addEventListener('click', () => {
+    const { _qid: qid, _title: title, _existing: existing } = modal;
+    const prop = propSelect.value;
+    closeModal();
+    openLinkPhotoModal(qid, title, prop, existing);
+  });
 
   $('upload-modal-close')?.addEventListener('click', closeModal);
   $('upload-btn-cancel')?.addEventListener('click',  closeModal);
@@ -2402,6 +2417,7 @@ function initUploadModal() {
     $('upload-caption').value  = $('upload-caption').value || title;
 
     submitBtn.disabled = false;
+    linkExistingBtn.classList.add('hidden');
     $('upload-status').classList.add('hidden');
   }
 
@@ -2437,6 +2453,15 @@ function initUploadModal() {
         submitBtn.disabled = false;
         submitBtn.classList.remove('loading');
         $('upload-btn-label').textContent = msg('upload-submit');
+        if (data.code === 'duplicate' && data.existing) {
+          // Unggah ulang foto yang sama tidak berguna; tawarkan menautkan berkas yang sudah ada
+          modal._existing = data.existing;
+          submitBtn.disabled = true;
+          linkExistingBtn.classList.remove('hidden');
+        } else if (data.code === 'exists') {
+          $('upload-filename').focus();
+          $('upload-filename').select();
+        }
         return;
       }
 

@@ -105,6 +105,8 @@
     </div>
     <div class="upload-modal-footer">
       <button class="btn btn--secondary" id="upload-btn-cancel">{{ msg('button-cancel') }}</button>
+      {# Muncul bila foto yang sama sudah ada di Commons: tautkan berkas itu, bukan unggah ulang #}
+      <button class="btn btn--primary hidden" id="upload-btn-link-existing">{{ msg('upload-link-existing') }}</button>
       <button class="btn btn--primary" id="upload-btn-submit" disabled>
         <span id="upload-btn-label">{{ msg('upload-submit') }}</span>
       </button>
