@@ -78,6 +78,12 @@
           <small>JPG · PNG · WebP &nbsp;·&nbsp; {{ msg('upload-max-size', 10) }}</small>
         </div>
         <img id="upload-preview-img" class="upload-preview-img hidden" alt="{{ msg('preview') }}">
+        {# Foto sah tetapi perangkat tidak bisa menampilkannya (mis. resolusi sangat besar di HP) #}
+        <div class="upload-drop-label hidden" id="upload-no-preview">
+          <svg viewBox="0 0 24 24" width="36" height="36" fill="currentColor"><path d="M21 19V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2zM8.5 13.5l2.5 3 3.5-4.5 4.5 6H5l3.5-4.5z"/></svg>
+          <span id="upload-no-preview-name"></span>
+          <small>{{ msg('upload-no-preview') }}</small>
+        </div>
       </div>
 
       <div class="upload-form-fields">

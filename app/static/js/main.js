@@ -2355,10 +2355,8 @@ function initUploadModal() {
   const closeModal = () => {
     modal.classList.add('hidden');
     fileInput.value = '';
-    if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
-    preview.removeAttribute('src');
-    preview.classList.add('hidden');
-    dropLabel.classList.remove('hidden');
+    modal._file = null;
+    resetPreview();
     $('upload-filename').value = '';
     $('upload-caption').value  = '';
     $('upload-status').classList.add('hidden');
@@ -2407,20 +2405,91 @@ function initUploadModal() {
     if (fileInput.files[0]) handleFileSelect(fileInput.files[0]);
   });
 
-  async function handleFileSelect(file) {
-    if (!file.type.startsWith('image/')) return setUploadStatus('error', msg('upload-images-only'));
-    if (file.size > 10 * 1024 * 1024) return setUploadStatus('error', msg('upload-too-large', 10));
-
-    // Object URL, bukan data URL: foto HP 5–10 MB tidak perlu disalin jadi teks base64 di memori
+  // Pratinjau: object URL (bukan data URL base64) agar hemat memori untuk foto HP besar
+  const noPreview = $('upload-no-preview');
+  function setPreview(url) {
     if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
-    preview.src = URL.createObjectURL(file);
+    preview.src = url;
     preview.classList.remove('hidden');
     dropLabel.classList.add('hidden');
+    noPreview.classList.add('hidden');
+  }
+  function resetPreview() {
+    if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+    preview.removeAttribute('src');
+    preview.classList.add('hidden');
+    noPreview.classList.add('hidden');
+    dropLabel.classList.remove('hidden');
+    modal._previewFile = null;
+  }
+
+  // Pratinjau gagal dimuat — mis. foto 50–200 MP di HP bermemori terbatas: coba versi kecil;
+  // bila tetap gagal, tampilkan nama berkas (foto tetap bisa diunggah, Commons yang memprosesnya)
+  preview.addEventListener('error', async () => {
+    const file = modal._previewFile;
+    if (!file || !preview.getAttribute('src')) return;
+    if (!preview.dataset.small) {
+      try {
+        const bmp = await createImageBitmap(file, { resizeHeight: 400, resizeQuality: 'medium' });
+        const canvas = Object.assign(document.createElement('canvas'), { width: bmp.width, height: bmp.height });
+        canvas.getContext('2d').drawImage(bmp, 0, 0);
+        bmp.close?.();
+        const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg', 0.85));
+        if (blob && modal._previewFile === file) {
+          preview.dataset.small = '1';
+          return setPreview(URL.createObjectURL(blob));
+        }
+      } catch { /* perangkat juga tidak bisa memperkecilnya */ }
+    }
+    if (modal._previewFile !== file) return;
+    if (preview.src.startsWith('blob:')) URL.revokeObjectURL(preview.src);
+    preview.removeAttribute('src');
+    preview.classList.add('hidden');
+    $('upload-no-preview-name').textContent = `${file.name} · ${(file.size / 1048576).toFixed(1)} MB`;
+    noPreview.classList.remove('hidden');
+  });
+
+  /** Foto ditolak: kosongkan pilihan agar tombol Upload tidak mengirim berkas ini. */
+  function rejectFile(text) {
+    modal._pick = null;
+    modal._file = null;
+    fileInput.value = '';
+    resetPreview();
+    submitBtn.disabled = true;
+    setUploadStatus('error', text);
+  }
+
+  async function handleFileSelect(picked) {
+    if (!picked.type.startsWith('image/')) return rejectFile(msg('upload-images-only'));
+    if (picked.size > 10 * 1024 * 1024) return rejectFile(msg('upload-too-large', 10));
+    const pick = modal._pick = {};  // pilihan foto terbaru; pilihan lama yang masih berjalan diabaikan
+
+    // Salin isi foto ke memori sekarang. Di Chrome Android berkas dari Google Foto / Galeri / Drive
+    // hanya rujukan ke aslinya; bila foto masih diunduh atau disinkronkan, membacanya belakangan
+    // gagal (pratinjau jadi ikon rusak, unggahan ERR_UPLOAD_FILE_CHANGED). Maksimal 10 MB.
+    let file;
+    try {
+      file = new File([await picked.arrayBuffer()], picked.name, { type: picked.type, lastModified: picked.lastModified });
+    } catch {
+      if (modal._pick === pick) rejectFile(msg('upload-read-failed'));
+      return;
+    }
+    if (modal._pick !== pick) return;
+
+    // Format dari isi berkas: HP Android bisa menyimpan HEIC (tidak diterima Commons, dan Chrome
+    // tidak bisa menampilkannya); Safari iOS sudah mengubahnya ke JPEG sendiri
+    const format = await photoFormat(file);
+    if (format === 'heic') return rejectFile(msg('upload-heic'));
+    if (!['jpeg', 'png', 'webp'].includes(format)) return rejectFile(msg('upload-format-unsupported'));
+
+    modal._file = file;  // yang diunggah: salinan ini, bukan fileInput.files[0]
+    modal._previewFile = file;
+    delete preview.dataset.small;
+    setPreview(URL.createObjectURL(file));
     linkExistingBtn.classList.add('hidden');
     $('upload-status').classList.add('hidden');
 
     // Auto-isi nama file: judul butir + tanggal foto (EXIF → tanggal file → hari ini)
-    const pick = modal._pick = {};  // pilihan foto terbaru; pilihan lama yang masih berjalan diabaikan
     const title = modal._title || '';
     const ext   = file.name.includes('.') ? file.name.split('.').pop() : 'jpg';
     const safe  = title.replace(/[^a-zA-Z0-9À-ɏ\s\-]/g, '').trim().replace(/\s+/g, '_');
@@ -2446,7 +2515,7 @@ function initUploadModal() {
   // Submit
   $('upload-btn-submit')?.addEventListener('click', async () => {
     const qid      = modal._qid;
-    const file     = fileInput.files[0];
+    const file     = modal._file;
     const filename = $('upload-filename').value.trim();
     const caption  = $('upload-caption').value.trim();
 
@@ -2686,6 +2755,25 @@ function showUploadLocation(exif) {
   group.classList.toggle('hidden', !has);
   $('upload-location-check').checked = true;
   $('upload-location-coords').textContent = has ? `${exif.lat}, ${exif.lon}` : '';
+}
+
+/**
+ * Format foto dari bita awal berkasnya ('jpeg' | 'png' | 'webp' | 'heic' | 'avif' | 'other'),
+ * bukan dari nama atau tipe MIME yang di Android tidak selalu akurat.
+ */
+async function photoFormat(file) {
+  try {
+    const b = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+    const text = (from, to) => String.fromCharCode(...b.slice(from, to));
+    if (b[0] === 0xFF && b[1] === 0xD8 && b[2] === 0xFF) return 'jpeg';
+    if (text(1, 4) === 'PNG') return 'png';
+    if (text(0, 4) === 'RIFF' && text(8, 12) === 'WEBP') return 'webp';
+    if (text(4, 8) === 'ftyp') return /^avi[fs]$/.test(text(8, 12)) ? 'avif' : 'heic';
+    return 'other';
+  } catch {
+    // Tidak terbaca: percaya tipe MIME-nya
+    return { 'image/jpeg': 'jpeg', 'image/png': 'png', 'image/webp': 'webp' }[file.type] || 'other';
+  }
 }
 
 /** Tanggal lokal sebagai YYYY-MM-DD. */
