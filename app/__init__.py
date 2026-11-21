@@ -1,3 +1,6 @@
+import hashlib
+import os
+
 from flask import Flask
 from werkzeug.middleware.proxy_fix import ProxyFix
 from config import DEV_SECRET_KEY, config
@@ -29,4 +32,28 @@ def create_app(config_name='default'):
     from .utils.enrich_store import close_db
     app.teardown_appcontext(close_db)
 
+    _init_static_versions(app)
+
     return app
+
+
+def _init_static_versions(app):
+    """Tambahkan ?v=<hash isi> ke setiap url_for('static', ...) agar browser tidak
+    memakai file lama dari cache setelah deploy."""
+    versions = {}  # filename → (mtime, hash)
+
+    @app.url_defaults
+    def add_static_version(endpoint, values):
+        if endpoint != 'static' or 'v' in values or 'filename' not in values:
+            return
+        path = os.path.join(app.static_folder, values['filename'])
+        try:
+            mtime = os.path.getmtime(path)
+        except OSError:
+            return
+        cached = versions.get(values['filename'])
+        if not cached or cached[0] != mtime:
+            with open(path, 'rb') as f:
+                cached = (mtime, hashlib.sha1(f.read()).hexdigest()[:10])
+            versions[values['filename']] = cached
+        values['v'] = cached[1]
