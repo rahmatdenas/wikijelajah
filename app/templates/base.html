@@ -95,6 +95,19 @@
           <label class="form-label" for="upload-caption">{{ msg('upload-caption') }}</label>
           <input type="text" id="upload-caption" class="form-input" placeholder="{{ msg('upload-caption-placeholder') }}">
         </div>
+        {# Kategori Commons (opsional): hanya yang dipilih dari saran (P373) atau hasil pencarian #}
+        <div class="form-group">
+          <label class="form-label" for="upload-cat-input">{{ msg('upload-categories') }}</label>
+          <div id="upload-cat-chips" class="cat-chips hidden"></div>
+          <div id="upload-cat-suggest" class="cat-suggest hidden"></div>
+          <div class="prop-edit-field cat-search">
+            <input type="text" id="upload-cat-input" class="form-input" autocomplete="off"
+                   placeholder="{{ msg('upload-categories-search') }}"
+                   role="combobox" aria-autocomplete="list" aria-controls="upload-cat-results">
+            <ul id="upload-cat-results" class="prop-suggest hidden" role="listbox"></ul>
+          </div>
+          <small class="upload-hint">{{ msg('upload-categories-hint', 5) }}</small>
+        </div>
         <div class="upload-license-notice">
           <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
           {{ msg_html('upload-license', '<strong>CC BY-SA 4.0</strong>'|safe) }}

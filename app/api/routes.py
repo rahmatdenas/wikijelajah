@@ -333,6 +333,56 @@ def _commons_upload_error(error):
     return info or msg('upload-failed')
 
 
+COMMONS_API = 'https://commons.wikimedia.org/w/api.php'
+MAX_UPLOAD_CATEGORIES = 5
+_CATEGORY_BAD_CHARS = re.compile(r'[\[\]{}|<>#\n\r\t]')
+
+
+def _upload_categories(raw, http, ua):
+    """(nama kategori, pesan galat) dari isian JSON tampilan.
+
+    Nama kategori disisipkan ke wikitext sebagai [[Category:…]], jadi karakter wikitext ditolak dan
+    setiap kategori diperiksa ke Commons: harus ada, tidak tersembunyi, dan bukan pengalihan.
+    """
+    try:
+        names = json.loads(raw or '[]')
+    except ValueError:
+        names = None
+    if not isinstance(names, list):
+        return [], msg('upload-category-invalid', raw)
+
+    cleaned = []
+    for n in names:
+        n = re.sub(r'^category:', '', str(n).strip(), flags=re.I).replace('_', ' ').strip()
+        if not n or len(n) > 200 or _CATEGORY_BAD_CHARS.search(n):
+            return [], msg('upload-category-invalid', n)
+        n = n[:1].upper() + n[1:]
+        if n not in cleaned:
+            cleaned.append(n)
+    if len(cleaned) > MAX_UPLOAD_CATEGORIES:
+        return [], msg('upload-category-too-many', MAX_UPLOAD_CATEGORIES)
+    if not cleaned:
+        return [], None
+
+    try:
+        data = http.get(COMMONS_API, params={
+            'action': 'query', 'format': 'json', 'formatversion': 2,
+            'titles': '|'.join(f'Category:{n}' for n in cleaned),
+            'prop': 'pageprops|categories', 'ppprop': 'hiddencat',
+            'clcategories': 'Category:Category redirects', 'cllimit': 'max',
+        }, headers={'User-Agent': ua}, timeout=15).json()
+    except Exception:
+        return [], msg('api-check-failed')
+    pages = {p['title']: p for p in data.get('query', {}).get('pages', [])}
+    for n in cleaned:
+        p = pages.get(f'Category:{n}')
+        if not p or p.get('missing') or p.get('invalid'):
+            return [], msg('upload-category-missing', n)
+        if p.get('pageprops') or p.get('categories'):
+            return [], msg('upload-category-unusable', n)
+    return cleaned, None
+
+
 def _shot_date(value):
     """Tanggal foto YYYY-MM-DD dari formulir; hari ini bila kosong, tidak sah, atau di masa depan."""
     today = date.today()
@@ -429,10 +479,15 @@ def upload_photo(qid):
 
     filename = _upload_filename(filename, file.filename)
 
-    commons_api  = 'https://commons.wikimedia.org/w/api.php'
+    commons_api  = COMMONS_API
     wikidata_api = current_app.config['WIKIMEDIA_API_BASE']
     ua           = _ua()
     oauth        = _get_authed_session()
+
+    categories, cat_error = _upload_categories(request.form.get('categories'), oauth, ua)
+    if cat_error:
+        return jsonify({'error': cat_error}), 400
+    category_text = ''.join(f'[[Category:{c}]]\n' for c in categories)
 
     # 1. CSRF token dari Commons
     try:
@@ -453,6 +508,7 @@ def upload_photo(qid):
         f"}}}}\n\n"
         f"=={{{{int:license-header}}}}==\n"
         f"{{{{self|cc-by-sa-4.0}}}}\n\n"
+        f"{category_text}"
         f"[[Category:Uploaded with WikiJelajah]]"
     )
 

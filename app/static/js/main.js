@@ -2365,7 +2365,9 @@ function initUploadModal() {
     modal._qid = null;
     modal._pick = null;
     modal._shotDate = '';
+    resetUploadCategories(null);
   };
+  initUploadCategories();
 
   // Foto yang sama sudah ada di Commons: pindah ke modal Tautkan dengan nama berkas itu
   const linkExistingBtn = $('upload-btn-link-existing');
@@ -2459,6 +2461,7 @@ function initUploadModal() {
     fd.append('caption',  caption);
     fd.append('property', prop);
     fd.append('date',     modal._shotDate || '');
+    fd.append('categories', JSON.stringify(UploadCats.chosen));
 
     try {
       const res  = await fetch(`/api/item/${qid}/upload-photo`, { method: 'POST', body: fd });
@@ -2518,7 +2521,141 @@ function openUploadModal(qid, title, prop = 'P18') {
   $('upload-filename').value = '';
   $('upload-status').classList.add('hidden');
   $('upload-btn-submit').disabled = true;
+  resetUploadCategories(qid);
   modal.classList.remove('hidden');
+}
+
+// ---------------------------------------------------------------------------
+// KATEGORI COMMONS di modal unggah — opsional; hanya dari saran (P373) atau hasil pencarian,
+// tidak bisa diketik bebas. Server memeriksa ulang ke Commons sebelum menulis wikitext.
+// ---------------------------------------------------------------------------
+
+const MAX_UPLOAD_CATEGORIES = 5;
+const UploadCats = { chosen: [], suggested: [], qid: null };
+const _catSuggestCache = new Map();  // qid → Promise<string[]>
+
+function renderUploadCategories() {
+  const chips = $('upload-cat-chips');
+  const sugg  = $('upload-cat-suggest');
+  const full  = UploadCats.chosen.length >= MAX_UPLOAD_CATEGORIES;
+
+  chips.innerHTML = UploadCats.chosen.map(c => `
+    <span class="cat-chip">${escHtml(c)}<button type="button" class="cat-chip-remove" data-cat="${escHtml(c)}"
+      aria-label="${escHtml(msg('upload-category-remove', c))}">×</button></span>`).join('');
+  chips.classList.toggle('hidden', !UploadCats.chosen.length);
+
+  const open = UploadCats.suggested.filter(c => !UploadCats.chosen.includes(c));
+  sugg.innerHTML = open.length
+    ? `<span class="upload-hint">${escHtml(msg('upload-categories-suggested'))}</span>` +
+      open.map(c => `<button type="button" class="cat-suggest-btn" data-cat="${escHtml(c)}"${full ? ' disabled' : ''}>+ ${escHtml(c)}</button>`).join('')
+    : '';
+  sugg.classList.toggle('hidden', !open.length);
+
+  const input = $('upload-cat-input');
+  input.disabled = full;
+  input.placeholder = full ? msg('upload-category-too-many', MAX_UPLOAD_CATEGORIES) : msg('upload-categories-search');
+}
+
+function addUploadCategory(name) {
+  if (UploadCats.chosen.includes(name) || UploadCats.chosen.length >= MAX_UPLOAD_CATEGORIES) return;
+  UploadCats.chosen.push(name);
+  renderUploadCategories();
+}
+
+/** Kosongkan pilihan; `qid` diisi saat modal dibuka → muat saran kategori butir itu. */
+function resetUploadCategories(qid) {
+  UploadCats.chosen = [];
+  UploadCats.suggested = [];
+  UploadCats.qid = qid;
+  $('upload-cat-input').value = '';
+  $('upload-cat-results').classList.add('hidden');
+  renderUploadCategories();
+  if (!qid) return;
+
+  if (!_catSuggestCache.has(qid)) {
+    _catSuggestCache.set(qid, fetchCategorySuggestions(qid).catch(() => { _catSuggestCache.delete(qid); return []; }));
+  }
+  _catSuggestCache.get(qid).then(list => {
+    if (UploadCats.qid !== qid) return;  // modal sudah ditutup / butir lain
+    UploadCats.suggested = list;
+    renderUploadCategories();
+  });
+}
+
+function initUploadCategories() {
+  const input = $('upload-cat-input');
+  const list  = $('upload-cat-results');
+  if (!input) return;
+  let timer = null;
+  let ctrl  = null;
+
+  $('upload-cat-chips').addEventListener('click', e => {
+    const btn = e.target.closest('.cat-chip-remove');
+    if (!btn) return;
+    UploadCats.chosen = UploadCats.chosen.filter(c => c !== btn.dataset.cat);
+    renderUploadCategories();
+  });
+  $('upload-cat-suggest').addEventListener('click', e => {
+    const btn = e.target.closest('.cat-suggest-btn');
+    if (btn) addUploadCategory(btn.dataset.cat);
+  });
+
+  const pick = li => {
+    addUploadCategory(li.dataset.cat);
+    input.value = '';
+    list.classList.add('hidden');
+    input.focus();
+  };
+
+  input.addEventListener('input', () => {
+    clearTimeout(timer);
+    const term = input.value.trim();
+    if (term.length < 2) { list.classList.add('hidden'); return; }
+
+    timer = setTimeout(async () => {
+      ctrl?.abort();
+      ctrl = new AbortController();
+      try {
+        const results = (await searchCommonsCategories(term, ctrl.signal)).filter(c => !UploadCats.chosen.includes(c));
+        list.innerHTML = results.length
+          ? results.map(c => `<li class="prop-suggest-item" role="option" data-cat="${escHtml(c)}">
+              <span class="prop-suggest-label">${escHtml(c)}</span></li>`).join('')
+          : `<li class="prop-suggest-empty">${escHtml(msg('upload-categories-none'))}</li>`;
+        list.classList.remove('hidden');
+      } catch (err) {
+        if (err.name !== 'AbortError') list.classList.add('hidden');
+      }
+    }, 250);
+  });
+
+  // Panah atas/bawah memilih, Enter menambahkan, Esc menutup daftar
+  input.addEventListener('keydown', e => {
+    const items = [...list.querySelectorAll('.prop-suggest-item')];
+    if (list.classList.contains('hidden') || !items.length) return;
+    const cur = items.findIndex(li => li.classList.contains('active'));
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const next = e.key === 'ArrowDown' ? (cur + 1) % items.length : (cur - 1 + items.length) % items.length;
+      items.forEach((li, i) => li.classList.toggle('active', i === next));
+      items[next].scrollIntoView({ block: 'nearest' });
+    } else if (e.key === 'Enter' && cur >= 0) {
+      e.preventDefault();
+      pick(items[cur]);
+    } else if (e.key === 'Escape') {
+      e.stopPropagation();
+      list.classList.add('hidden');
+    }
+  });
+
+  // mousedown (bukan click) agar input tidak kehilangan fokus sebelum pilihan tercatat
+  list.addEventListener('mousedown', e => {
+    const li = e.target.closest('.prop-suggest-item');
+    if (!li) return;
+    e.preventDefault();
+    pick(li);
+  });
+
+  input.addEventListener('blur', () => setTimeout(() => list.classList.add('hidden'), 150));
 }
 
 /** Tanggal lokal sebagai YYYY-MM-DD. */
