@@ -1,5 +1,6 @@
 import json
 import re
+import time
 from datetime import date
 from functools import wraps
 import requests
@@ -383,6 +384,68 @@ def _upload_categories(raw, http, ua):
     return cleaned, None
 
 
+# Jenis gambar yang memotret butir itu sendiri → berkasnya "menggambarkan" (P180) butir.
+# Makam, plakat, dan papan nama memotret benda lain, jadi tidak diberi P180.
+DEPICTS_PROPS = {'P18', 'P5775', 'P9721', 'P8592', 'P12565', 'P3451'}
+
+
+def _commons_structured_data(http, ua, qid, filename, prop, caption=''):
+    """Tambah "menggambarkan" (P180) = butir dan keterangan (caption, bahasa antarmuka) ke data
+    terstruktur berkas Commons. Yang sudah ada tidak ditimpa. Kembalikan pesan peringatan bila gagal."""
+    lang = get_lang()
+    try:
+        page = {}
+        for attempt in range(2):  # berkas yang baru diunggah kadang belum terbaca di replika
+            pages = http.get(COMMONS_API, params={
+                'action': 'query', 'format': 'json', 'formatversion': 2,
+                'titles': f'File:{filename}', 'prop': 'info',
+            }, headers={'User-Agent': ua}, timeout=15).json().get('query', {}).get('pages', [])
+            page = pages[0] if pages else {}
+            if page.get('pageid'):
+                break
+            time.sleep(2)
+        if not page.get('pageid'):
+            return msg('api-structured-data-failed', f'File:{filename}')
+
+        mid = f"M{page['pageid']}"
+        ent = http.get(COMMONS_API, params={
+            'action': 'wbgetentities', 'ids': mid, 'format': 'json',
+        }, headers={'User-Agent': ua}, timeout=15).json().get('entities', {}).get(mid, {})
+
+        data = {}
+        depicts = (ent.get('statements') or ent.get('claims') or {}).get('P180', [])
+        if prop in DEPICTS_PROPS and not any(
+                (s.get('mainsnak', {}).get('datavalue', {}).get('value') or {}).get('id') == qid for s in depicts):
+            data['claims'] = [{
+                'mainsnak': {
+                    'snaktype': 'value', 'property': 'P180',
+                    'datavalue': {'type': 'wikibase-entityid',
+                                  'value': {'entity-type': 'item', 'numeric-id': int(qid[1:]), 'id': qid}},
+                },
+                'type': 'statement', 'rank': 'normal',
+            }]
+        caption = caption.strip()[:250]
+        if caption and lang not in (ent.get('labels') or {}):
+            data['labels'] = {lang: {'language': lang, 'value': caption}}
+        if not data:
+            return None
+
+        token = _get_csrf_token(http, COMMONS_API)
+        res = http.post(COMMONS_API, data={
+            'action': 'wbeditentity', 'id': mid, 'data': json.dumps(data),
+            'token': token, 'format': 'json',
+            'summary': f'Menggambarkan {qid} via WikiJelajah',
+        }, headers={'User-Agent': ua}, timeout=30).json()
+        if 'error' in res:
+            return msg('api-structured-data-failed', res['error'].get('info', ''))
+    except WikimediaAuthError as e:
+        return msg('api-structured-data-failed', e)
+    except Exception as e:
+        current_app.logger.warning('Data terstruktur %s gagal: %s', filename, e)
+        return msg('api-structured-data-failed', e)
+    return None
+
+
 def _shot_date(value):
     """Tanggal foto YYYY-MM-DD dari formulir; hari ini bila kosong, tidak sah, atau di masa depan."""
     today = date.today()
@@ -451,7 +514,9 @@ def set_image(qid):
     if 'error' in wd:
         return jsonify({'error': wd['error'].get('info', msg('link-photo-failed'))}), 500
 
-    return jsonify({'success': True, 'filename': filename})
+    # Arah sebaliknya: berkas Commons "menggambarkan" butir ini (gagal = peringatan saja)
+    warning = _commons_structured_data(http, _ua(), qid, filename, prop) if prop in DEPICTS_PROPS else None
+    return jsonify({'success': True, 'filename': filename, **({'warning': warning} if warning else {})})
 
 
 # ---------------------------------------------------------------------------
@@ -560,19 +625,16 @@ def upload_photo(qid):
 
     # Nama file final yang diterima Commons (bisa berbeda karena normalisasi)
     final_filename = upload_info.get('filename', filename)
+    warnings = []
 
-    # 4. CSRF token dari Wikidata
-    try:
-        csrf_wikidata = _get_csrf_token(oauth, wikidata_api)
-    except Exception as e:
-        return jsonify({
-            'success': True,
-            'filename': final_filename,
-            'warning': msg('api-upload-p18-failed', e),
-        })
+    # 4. Data terstruktur berkas: menggambarkan (P180) = butir, keterangan = caption
+    sd_warning = _commons_structured_data(oauth, ua, qid, final_filename, prop, caption)
+    if sd_warning:
+        warnings.append(sd_warning)
 
     # 5. Tambah klaim gambar ke Wikidata
     try:
+        csrf_wikidata = _get_csrf_token(oauth, wikidata_api)
         wd = oauth.post(
             wikidata_api,
             data={
@@ -587,18 +649,12 @@ def upload_photo(qid):
             },
             headers={'User-Agent': ua},
         ).json()
+        if 'error' in wd:
+            warnings.insert(0, msg('api-upload-p18-failed', wd['error'].get('info', '')))
     except Exception as e:
-        return jsonify({
-            'success': True,
-            'filename': final_filename,
-            'warning': msg('api-upload-p18-failed', e),
-        })
+        warnings.insert(0, msg('api-upload-p18-failed', e))
 
-    if 'error' in wd:
-        return jsonify({
-            'success': True,
-            'filename': final_filename,
-            'warning': msg('api-upload-p18-failed', wd['error'].get('info', '')),
-        })
-
-    return jsonify({'success': True, 'filename': final_filename})
+    result = {'success': True, 'filename': final_filename}
+    if warnings:
+        result['warning'] = ' · '.join(warnings)
+    return jsonify(result)

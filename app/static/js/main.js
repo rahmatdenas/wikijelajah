@@ -2301,10 +2301,12 @@ function initLinkPhotoModal() {
       }
 
       afterImageSaved(qid, prop, data.filename);
-      setLinkPhotoStatus('success', `✓ ${msg('link-photo-success', msg(`image-prop-${prop}`))}`);
+      // Peringatan = tertaut di Wikidata, tapi data terstruktur Commons gagal; beri waktu membaca
+      if (data.warning) setLinkPhotoStatus('warning', `✓ ${msg('link-photo-success', msg(`image-prop-${prop}`))} ${data.warning}`);
+      else setLinkPhotoStatus('success', `✓ ${msg('link-photo-success', msg(`image-prop-${prop}`))}`);
       $('link-photo-btn-label').textContent = msg('button-done');
 
-      setTimeout(() => { closeModal(); renderDetail(qid); }, 1500);
+      setTimeout(() => { closeModal(); renderDetail(qid); }, data.warning ? 5000 : 1500);
 
     } catch (err) {
       setLinkPhotoStatus('error', msg('error-generic', err.message));
@@ -2499,7 +2501,7 @@ function initUploadModal() {
       setTimeout(() => {
         closeModal();
         renderDetail(qid);
-      }, 1800);
+      }, data.warning ? 5000 : 1800);
 
     } catch (err) {
       setUploadStatus('error', msg('error-generic', err.message));

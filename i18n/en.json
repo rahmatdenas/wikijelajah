@@ -331,6 +331,7 @@
 	"upload-category-too-many": "At most $1 categories",
 	"upload-category-missing": "The category \"$1\" does not exist on Commons.",
 	"upload-category-unusable": "The category \"$1\" is hidden or redirected; choose another category.",
+	"api-structured-data-failed": "Commons structured data (depicts / caption) could not be added: $1",
 	"upload-link-existing": "Link existing file",
 	"pk-login-title": "Enrich data with AI",
 	"pk-login-intro": "Find values for empty Wikidata attributes with the help of AI, check the sources, then save them to Wikidata under your own account. Log in first to use this feature.",

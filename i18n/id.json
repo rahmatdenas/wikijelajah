@@ -331,6 +331,7 @@
 	"upload-category-too-many": "Paling banyak $1 kategori",
 	"upload-category-missing": "Kategori \"$1\" tidak ada di Commons.",
 	"upload-category-unusable": "Kategori \"$1\" tersembunyi atau sudah dialihkan; pilih kategori lain.",
+	"api-structured-data-failed": "Data terstruktur Commons (menggambarkan / keterangan) gagal ditambahkan: $1",
 	"upload-link-existing": "Tautkan berkas yang ada",
 	"pk-login-title": "Perkaya Data dengan AI",
 	"pk-login-intro": "Temukan nilai atribut Wikidata yang masih kosong dengan bantuan AI, periksa sumbernya, lalu simpan ke Wikidata atas nama akun Anda. Masuk terlebih dahulu untuk memakai fitur ini.",

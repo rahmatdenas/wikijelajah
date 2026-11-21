@@ -331,6 +331,7 @@
 	"upload-category-too-many": "Shown when the maximum number of categories is chosen (also as placeholder of the disabled search field).\n\nParameters:\n* $1 – maximum number",
 	"upload-category-missing": "Error when a chosen category does not exist on Commons.\n\nParameters:\n* $1 – category name",
 	"upload-category-unusable": "Error when a chosen category is a hidden or redirected Commons category.\n\nParameters:\n* $1 – category name",
+	"api-structured-data-failed": "Warning after uploading or linking a photo when the depicts statement or caption could not be added to the Commons file.\n\nParameters:\n* $1 – technical error",
 	"upload-link-existing": "Button in the upload dialog, shown when the photo is already on Commons; opens the link photo dialog with that file.",
 	"pk-login-title": "Heading of the Enrich Data page for logged-out users.",
 	"pk-login-intro": "Introduction of the Enrich Data page for logged-out users.",
