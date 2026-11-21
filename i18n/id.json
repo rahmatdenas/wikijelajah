@@ -331,6 +331,8 @@
 	"upload-category-too-many": "Paling banyak $1 kategori",
 	"upload-category-missing": "Kategori \"$1\" tidak ada di Commons.",
 	"upload-category-unusable": "Kategori \"$1\" tersembunyi atau sudah dialihkan; pilih kategori lain.",
+	"upload-location": "Sertakan lokasi kamera",
+	"upload-location-hint": "Diambil dari GPS foto dan ditampilkan di peta Commons. Hapus centang bila foto diambil di tempat pribadi, mis. rumah.",
 	"api-structured-data-failed": "Data terstruktur Commons (menggambarkan / keterangan) gagal ditambahkan: $1",
 	"upload-link-existing": "Tautkan berkas yang ada",
 	"pk-login-title": "Perkaya Data dengan AI",

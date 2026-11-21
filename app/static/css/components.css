@@ -737,6 +737,9 @@ select option { color: var(--color-text); }
 .cat-suggest-btn:hover { background: var(--color-accent-bg); border-style: solid; }
 .cat-search { display: block; }
 .cat-search .prop-suggest { width: 100%; max-width: none; }
+
+.upload-check { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 6px; cursor: pointer; font-size: var(--text-sm); font-weight: 600; }
+.upload-check input { accent-color: var(--color-primary); width: 16px; height: 16px; }
 .upload-hint { font-size: var(--text-xs); color: var(--color-text-muted); line-height: 1.5; }
 
 .upload-license-notice {

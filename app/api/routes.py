@@ -389,9 +389,10 @@ def _upload_categories(raw, http, ua):
 DEPICTS_PROPS = {'P18', 'P5775', 'P9721', 'P8592', 'P12565', 'P3451'}
 
 
-def _commons_structured_data(http, ua, qid, filename, prop, caption=''):
-    """Tambah "menggambarkan" (P180) = butir dan keterangan (caption, bahasa antarmuka) ke data
-    terstruktur berkas Commons. Yang sudah ada tidak ditimpa. Kembalikan pesan peringatan bila gagal."""
+def _commons_structured_data(http, ua, qid, filename, prop, caption='', extra=()):
+    """Tambah "menggambarkan" (P180) = butir, keterangan (caption, bahasa antarmuka), dan pernyataan
+    `extra` (lihat _upload_statements) ke data terstruktur berkas Commons. Properti yang sudah terisi
+    tidak ditimpa. Kembalikan pesan peringatan bila gagal."""
     lang = get_lang()
     try:
         page = {}
@@ -413,17 +414,14 @@ def _commons_structured_data(http, ua, qid, filename, prop, caption=''):
         }, headers={'User-Agent': ua}, timeout=15).json().get('entities', {}).get(mid, {})
 
         data = {}
-        depicts = (ent.get('statements') or ent.get('claims') or {}).get('P180', [])
+        statements = ent.get('statements') or ent.get('claims') or {}
+        claims = [c for c in extra if not statements.get(c['mainsnak']['property'])]
+        depicts = statements.get('P180', [])
         if prop in DEPICTS_PROPS and not any(
                 (s.get('mainsnak', {}).get('datavalue', {}).get('value') or {}).get('id') == qid for s in depicts):
-            data['claims'] = [{
-                'mainsnak': {
-                    'snaktype': 'value', 'property': 'P180',
-                    'datavalue': {'type': 'wikibase-entityid',
-                                  'value': {'entity-type': 'item', 'numeric-id': int(qid[1:]), 'id': qid}},
-                },
-                'type': 'statement', 'rank': 'normal',
-            }]
+            claims.insert(0, _statement(_item_snak('P180', qid)))
+        if claims:
+            data['claims'] = claims
         caption = caption.strip()[:250]
         if caption and lang not in (ent.get('labels') or {}):
             data['labels'] = {lang: {'language': lang, 'value': caption}}
@@ -434,7 +432,8 @@ def _commons_structured_data(http, ua, qid, filename, prop, caption=''):
         res = http.post(COMMONS_API, data={
             'action': 'wbeditentity', 'id': mid, 'data': json.dumps(data),
             'token': token, 'format': 'json',
-            'summary': f'Menggambarkan {qid} via WikiJelajah',
+            'summary': 'Data terstruktur via WikiJelajah: ' + ', '.join(
+                [c['mainsnak']['property'] for c in data.get('claims', [])] + (['caption'] if 'labels' in data else [])),
         }, headers={'User-Agent': ua}, timeout=30).json()
         if 'error' in res:
             return msg('api-structured-data-failed', res['error'].get('info', ''))
@@ -446,14 +445,84 @@ def _commons_structured_data(http, ua, qid, filename, prop, caption=''):
     return None
 
 
-def _shot_date(value):
-    """Tanggal foto YYYY-MM-DD dari formulir; hari ini bila kosong, tidak sah, atau di masa depan."""
-    today = date.today()
+def _item_snak(prop, qid):
+    return {'snaktype': 'value', 'property': prop,
+            'datavalue': {'type': 'wikibase-entityid',
+                          'value': {'entity-type': 'item', 'numeric-id': int(qid[1:]), 'id': qid}}}
+
+
+def _statement(mainsnak, qualifiers=None):
+    st = {'mainsnak': mainsnak, 'type': 'statement', 'rank': 'normal'}
+    if qualifiers:
+        st['qualifiers'] = {q['property']: [q] for q in qualifiers}
+        st['qualifiers-order'] = [q['property'] for q in qualifiers]
+    return st
+
+
+def _upload_statements(author, shot, location):
+    """Pernyataan data terstruktur untuk unggahan WikiJelajah (selalu karya sendiri, CC BY-SA 4.0),
+    sama dengan isi wikitext {{Information}} / {{self}} / {{Location}}.
+
+    `shot`: tanggal pemotretan (date) dari EXIF atau None; `location`: (lat, lon, heading|None) atau None.
+    """
+    user_url = f"https://commons.wikimedia.org/wiki/User:{author.replace(' ', '_')}"
+    statements = [
+        _statement(_item_snak('P6216', 'Q50423863')),   # status hak cipta: dilindungi hak cipta
+        _statement(_item_snak('P275', 'Q18199165')),    # lisensi: CC BY-SA 4.0
+        _statement(_item_snak('P7482', 'Q66458942')),   # sumber berkas: karya asli pengunggah
+        # pembuat: tidak punya butir Wikidata → somevalue + nama, akun, dan tautan halaman pengguna
+        _statement({'snaktype': 'somevalue', 'property': 'P170'}, [
+            {'snaktype': 'value', 'property': 'P2093', 'datavalue': {'type': 'string', 'value': author}},
+            {'snaktype': 'value', 'property': 'P4174', 'datavalue': {'type': 'string', 'value': author}},
+            {'snaktype': 'value', 'property': 'P2699', 'datavalue': {'type': 'string', 'value': user_url}},
+        ]),
+    ]
+    if shot:
+        statements.append(_statement({'snaktype': 'value', 'property': 'P571', 'datavalue': {'type': 'time', 'value': {
+            'time': f'+{shot.isoformat()}T00:00:00Z', 'timezone': 0, 'before': 0, 'after': 0,
+            'precision': 11, 'calendarmodel': 'http://www.wikidata.org/entity/Q1985727'}}}))
+    if location:
+        lat, lon, heading = location
+        quals = [{'snaktype': 'value', 'property': 'P7787', 'datavalue': {'type': 'quantity', 'value': {
+            'amount': f'+{heading:g}', 'unit': 'http://www.wikidata.org/entity/Q28390'}}}] if heading is not None else None
+        statements.append(_statement({'snaktype': 'value', 'property': 'P1259', 'datavalue': {
+            'type': 'globecoordinate', 'value': {'latitude': lat, 'longitude': lon, 'altitude': None,
+                                                 'precision': 1e-06, 'globe': 'http://www.wikidata.org/entity/Q2'}}}, quals))
+    return statements
+
+
+def _exif_date(value):
+    """Tanggal pemotretan dari formulir (YYYY-MM-DD, EXIF); None bila kosong, tidak sah, atau di masa depan."""
     try:
         shot = date.fromisoformat((value or '').strip())
     except ValueError:
-        return today.isoformat()
-    return shot.isoformat() if shot <= today else today.isoformat()
+        return None
+    return shot if shot <= date.today() else None
+
+
+def _shot_date(value, time_value=''):
+    """Isi |date= di {{Information}}: tanggal (dan jam) pemotretan EXIF bila ada, selain itu hari ini."""
+    shot = _exif_date(value)
+    if not shot:
+        return date.today().isoformat()
+    t = (time_value or '').strip()
+    return f'{shot.isoformat()} {t}' if re.fullmatch(r'([01]\d|2[0-3]):[0-5]\d:[0-5]\d', t) else shot.isoformat()
+
+
+def _camera_location(form):
+    """(lat, lon, heading|None) lokasi kamera dari GPS EXIF yang dikirim tampilan; None bila tidak ada / tidak sah."""
+    try:
+        lat, lon = float(form.get('lat', '')), float(form.get('lon', ''))
+    except ValueError:
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat == 0 and lon == 0):
+        return None
+    try:
+        heading = float(form.get('heading', ''))
+        heading = round(heading, 2) if 0 <= heading <= 360 else None
+    except ValueError:
+        heading = None
+    return round(lat, 6), round(lon, 6), heading
 
 
 # Endpoint: tautkan file Commons yang sudah ada ke properti gambar Wikidata (bawaan P18)
@@ -562,15 +631,21 @@ def upload_photo(qid):
     except Exception as e:
         return jsonify({'error': msg('api-token-failed', e)}), 500
 
-    # 2. Wikitext halaman file — tanggal pemotretan (EXIF, dikirim tampilan) bila ada, selain itu hari ini
+    # 2. Wikitext halaman file — tanggal & jam pemotretan dan lokasi kamera dari EXIF (dikirim tampilan)
+    location = _camera_location(request.form)
+    location_text = ''
+    if location:
+        lat, lon, heading = location
+        location_text = f"{{{{Location|{lat}|{lon}{f'|heading:{heading:g}' if heading is not None else ''}}}}}\n"
     wikitext = (
         f"=={{{{int:filedesc}}}}==\n"
         f"{{{{Information\n"
         f"|description={{{{{get_lang()}|1={caption or filename}}}}}\n"
-        f"|date={_shot_date(request.form.get('date'))}\n"
+        f"|date={_shot_date(request.form.get('date'), request.form.get('time'))}\n"
         f"|source={{{{own}}}}\n"
         f"|author=[[User:{author}|{author}]]\n"
-        f"}}}}\n\n"
+        f"}}}}\n"
+        f"{location_text}\n"
         f"=={{{{int:license-header}}}}==\n"
         f"{{{{self|cc-by-sa-4.0}}}}\n\n"
         f"{category_text}"
@@ -627,8 +702,11 @@ def upload_photo(qid):
     final_filename = upload_info.get('filename', filename)
     warnings = []
 
-    # 4. Data terstruktur berkas: menggambarkan (P180) = butir, keterangan = caption
-    sd_warning = _commons_structured_data(oauth, ua, qid, final_filename, prop, caption)
+    # 4. Data terstruktur berkas: menggambarkan (P180) = butir, keterangan = caption, serta lisensi,
+    #    pembuat, tanggal, dan lokasi kamera (sama dengan wikitext; menghapus kategori "missing SDC …")
+    sd_warning = _commons_structured_data(
+        oauth, ua, qid, final_filename, prop, caption,
+        extra=_upload_statements(author, _exif_date(request.form.get('date')), location))
     if sd_warning:
         warnings.append(sd_warning)
 

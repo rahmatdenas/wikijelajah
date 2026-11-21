@@ -2366,7 +2366,8 @@ function initUploadModal() {
     linkExistingBtn.classList.add('hidden');
     modal._qid = null;
     modal._pick = null;
-    modal._shotDate = '';
+    modal._exif = {};
+    showUploadLocation({});
     resetUploadCategories(null);
   };
   initUploadCategories();
@@ -2424,10 +2425,11 @@ function initUploadModal() {
     const safe  = title.replace(/[^a-zA-Z0-9À-ɏ\s\-]/g, '').trim().replace(/\s+/g, '_');
     $('upload-caption').value = $('upload-caption').value || title;
 
-    const shotDate = await exifDate(file);
+    const exif = await exifInfo(file);
     if (modal._pick !== pick) return;
-    modal._shotDate = shotDate;
-    const day  = shotDate || isoDate(new Date(file.lastModified || Date.now()));
+    modal._exif = exif;
+    showUploadLocation(exif);
+    const day  = exif.date || isoDate(new Date(file.lastModified || Date.now()));
     const base = safe ? `${safe}_${day}` : file.name.replace(/\.[^.]*$/, '').trim().replace(/\s+/g, '_');
     const suggested = `${base}.${ext}`;
     $('upload-filename').value = suggested;
@@ -2462,7 +2464,15 @@ function initUploadModal() {
     fd.append('filename', filename);
     fd.append('caption',  caption);
     fd.append('property', prop);
-    fd.append('date',     modal._shotDate || '');
+    // Data EXIF untuk halaman berkas: tanggal & jam pemotretan, lokasi kamera (bila dicentang)
+    const exif = modal._exif || {};
+    fd.append('date', exif.date || '');
+    fd.append('time', exif.date && exif.time ? exif.time : '');
+    if (exif.lat != null && $('upload-location-check').checked) {
+      fd.append('lat', exif.lat);
+      fd.append('lon', exif.lon);
+      if (exif.heading != null) fd.append('heading', exif.heading);
+    }
     fd.append('categories', JSON.stringify(UploadCats.chosen));
 
     try {
@@ -2660,29 +2670,45 @@ function initUploadCategories() {
   input.addEventListener('blur', () => setTimeout(() => list.classList.add('hidden'), 150));
 }
 
+/** Pilihan "Sertakan lokasi kamera": hanya tampil bila foto punya GPS; bawaannya dicentang. */
+function showUploadLocation(exif) {
+  const group = $('upload-location-group');
+  if (!group) return;
+  const has = exif.lat != null;
+  group.classList.toggle('hidden', !has);
+  $('upload-location-check').checked = true;
+  $('upload-location-coords').textContent = has ? `${exif.lat}, ${exif.lon}` : '';
+}
+
 /** Tanggal lokal sebagai YYYY-MM-DD. */
 function isoDate(d) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Tanggal pemotretan (YYYY-MM-DD) dari EXIF foto JPEG; '' bila tidak ada atau tidak terbaca. */
-async function exifDate(file) {
-  if (!/jpe?g$/i.test(file.type)) return '';
+/**
+ * Info pemotretan dari EXIF foto JPEG: { date: 'YYYY-MM-DD', time: 'HH:MM:SS', lat, lon, heading }.
+ * Bagian yang tidak ada / tidak terbaca dibiarkan kosong; berkas selain JPEG → {}.
+ */
+async function exifInfo(file) {
+  if (!/jpe?g$/i.test(file.type)) return {};
   try {
     const v = new DataView(await file.slice(0, 256 * 1024).arrayBuffer());
-    if (v.getUint16(0) !== 0xFFD8) return '';
+    if (v.getUint16(0) !== 0xFFD8) return {};
     // Cari segmen APP1 "Exif" di antara segmen-segmen awal JPEG
     for (let off = 2; off + 10 < v.byteLength; off += 2 + v.getUint16(off + 2)) {
       const marker = v.getUint16(off);
-      if (marker === 0xFFE1 && v.getUint32(off + 4) === 0x45786966) return exifTiffDate(v, off + 10);
+      if (marker === 0xFFE1 && v.getUint32(off + 4) === 0x45786966) return exifTiffInfo(v, off + 10);
       if ((marker & 0xFF00) !== 0xFF00 || marker === 0xFFDA) break;  // awal data gambar: tidak ada EXIF
     }
   } catch { /* berkas rusak / terpotong */ }
-  return '';
+  return {};
 }
 
-/** DateTimeOriginal (0x9003) → DateTimeDigitized (0x9004) → DateTime (0x0132) dari blok TIFF EXIF. */
-function exifTiffDate(v, tiff) {
+/**
+ * Dari blok TIFF EXIF: tanggal & jam DateTimeOriginal (0x9003) → DateTimeDigitized (0x9004) →
+ * DateTime (0x0132), dan GPS (lintang/bujur 0x1–0x4, arah kamera 0x11).
+ */
+function exifTiffInfo(v, tiff) {
   const le  = v.getUint16(tiff) === 0x4949;  // "II" = little endian
   const u16 = o => v.getUint16(tiff + o, le);
   const u32 = o => v.getUint32(tiff + o, le);
@@ -2690,20 +2716,49 @@ function exifTiffDate(v, tiff) {
     const out = {};
     for (let i = 0, n = u16(ifd); i < n; i++) {
       const e = ifd + 2 + i * 12;
-      out[u16(e)] = { count: u32(e + 4), value: u32(e + 8) };
+      out[u16(e)] = { count: u32(e + 4), value: u32(e + 8), entry: e };
     }
     return out;
   };
-  const ascii = t => t && t.count > 4
-    ? String.fromCharCode(...new Uint8Array(v.buffer, v.byteOffset + tiff + t.value, t.count - 1)) : '';
+  // Nilai ≤ 4 bita tersimpan langsung di entri, lebih dari itu di offset `value`
+  const ascii = t => {
+    if (!t || !t.count) return '';
+    const start = t.count > 4 ? t.value : t.entry + 8;
+    return String.fromCharCode(...new Uint8Array(v.buffer, v.byteOffset + tiff + start, t.count)).replace(/\0.*$/s, '');
+  };
+  const rational = (t, i = 0) => {
+    const den = u32(t.value + i * 8 + 4);
+    return den ? u32(t.value + i * 8) / den : NaN;
+  };
 
+  const info = {};
   const ifd0 = tags(u32(4));
   const exif = ifd0[0x8769] ? tags(ifd0[0x8769].value) : {};
   for (const t of [exif[0x9003], exif[0x9004], ifd0[0x0132]]) {
-    const m = ascii(t).match(/^(\d{4}):(\d{2}):(\d{2})/);
-    if (m && +m[1] >= 1840 && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31) return `${m[1]}-${m[2]}-${m[3]}`;
+    const m = ascii(t).match(/^(\d{4}):(\d{2}):(\d{2})(?: (\d{2}):(\d{2}):(\d{2}))?/);
+    if (m && +m[1] >= 1840 && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31) {
+      info.date = `${m[1]}-${m[2]}-${m[3]}`;
+      if (m[4] && +m[4] < 24 && +m[5] < 60 && +m[6] < 60) info.time = `${m[4]}:${m[5]}:${m[6]}`;
+      break;
+    }
   }
-  return '';
+
+  const gps = ifd0[0x8825] ? tags(ifd0[0x8825].value) : {};
+  const deg = (t, ref, neg) => {
+    if (!t || t.count !== 3) return NaN;
+    const d = rational(t, 0) + rational(t, 1) / 60 + rational(t, 2) / 3600;
+    return ascii(ref).trim().toUpperCase() === neg ? -d : d;
+  };
+  const lat = deg(gps[0x2], gps[0x1], 'S');
+  const lon = deg(gps[0x4], gps[0x3], 'W');
+  // 0,0 biasanya berarti GPS kosong, bukan benar-benar di Teluk Guinea
+  if (Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && (lat || lon)) {
+    info.lat = +lat.toFixed(6);
+    info.lon = +lon.toFixed(6);
+    const h = gps[0x11] ? rational(gps[0x11]) : NaN;
+    if (h >= 0 && h <= 360) info.heading = +h.toFixed(2);
+  }
+  return info;
 }
 
 function setUploadStatus(type, msg) {

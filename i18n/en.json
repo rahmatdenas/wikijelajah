@@ -331,6 +331,8 @@
 	"upload-category-too-many": "At most $1 categories",
 	"upload-category-missing": "The category \"$1\" does not exist on Commons.",
 	"upload-category-unusable": "The category \"$1\" is hidden or redirected; choose another category.",
+	"upload-location": "Include camera location",
+	"upload-location-hint": "Taken from the photo's GPS and shown on maps on Commons. Untick it if the photo was taken at a private place, such as a home.",
 	"api-structured-data-failed": "Commons structured data (depicts / caption) could not be added: $1",
 	"upload-link-existing": "Link existing file",
 	"pk-login-title": "Enrich data with AI",
