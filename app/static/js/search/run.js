@@ -41,7 +41,7 @@ const _CACHE_TTL = 30 * 60 * 1000;
 
 function _cacheKey(p) {
   // Bahasa ikut kunci: label & judul artikel Wikipedia berbeda per bahasa
-  return `wj5:${I18N.lang}:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
+  return `wj6:${I18N.lang}:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
 }
 
 function _loadCache(key) {
@@ -185,9 +185,14 @@ async function startSearch() {
           lokQid: lQid, lokLabel: row.lLabel?.value || '',
           provQid: null, provLabel: '',   // provinsi pertama (untuk teks ringkas)
           provQids: [], provLabels: [],   // semua provinsi: butir berlokasi banyak muncul di setiap filternya
+          lokasiRaw: {},                  // QID lokasi → [label, QID wilayah filter]; dirapikan jadi r.lokasi di finishBuildResults
           yearStr, year: yearOf(row.tM?.value),
         };
         State.sortedIds.push(qid);
+      }
+      if (lQid) {
+        const lok = rec.lokasiRaw[lQid] ||= [row.lLabel?.value || '', []];
+        if (pQid && !lok[1].includes(pQid)) lok[1].push(pQid);
       }
       if (pQid && !rec.provQids.includes(pQid)) {
         rec.provQids.push(pQid);
@@ -317,6 +322,9 @@ function resetHasilUI() {
   const btnCukup = $('btn-cukupkan');
   if (btnCukup) { btnCukup.disabled = false; btnCukup.textContent = msg('stop-search'); }
   if (DOM.hasilList) DOM.hasilList.innerHTML = '';
+  // Jumlah hasil pencarian sebelumnya ("107 hasil") ikut hilang; muncul lagi setelah daftar baru dirender
+  const end = $('hasil-end');
+  if (end) { end.textContent = ''; end.classList.add('hidden'); _listObserver?.unobserve(end); }
   if (DOM.filterWilayah) DOM.filterWilayah.innerHTML = `<option value="all">${escHtml(msg('filter-all-regions'))}</option>`;
   if (DOM.filterUrut) DOM.filterUrut.innerHTML = `
     <option value="nama">${escHtml(msg('sort-name'))}</option>
@@ -341,29 +349,32 @@ function hasFilter() {
 /** Siklus tombol Gambar/Artikel: lepas → Ada → Tanpa → lepas. */
 const nextMediaFilter = state => state === null ? 'has' : state === 'has' ? 'without' : null;
 
-/** Label, jumlah, dan status aktif tombol Semua / Artikel / Foto. Jumlah media = spinner selama dimuat. */
+/** Label, jumlah, dan status aktif tombol Semua / Artikel / Foto. Jumlah media = spinner selama dimuat; Semua tanpa jumlah. */
 function updateFilterButtons() {
   const f   = State.filter;
   const all = State.sortedIds.map(id => State.records[id]);
   const setLabel = (btn, text, count, on) => {
     if (!btn) return;
-    const badge = count === null
-      ? '<span class="loader feature-btn-loader" aria-hidden="true"></span>'
+    const badge = count === undefined ? ''
+      : count === null ? '<span class="loader feature-btn-loader" aria-hidden="true"></span>'
       : `<span class="feature-btn-count">${escHtml(formatNumber(count))}</span>`;
     btn.innerHTML = `<span>${escHtml(text)}</span>${badge}`;
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-pressed', String(on));
   };
-  const media = (btn, state, field, hasKey, withoutKey) => {
-    // Jumlah tidak terpengaruh saringan lain agar angkanya tetap
+  const media = (btn, state, field, key, hasKey, withoutKey) => {
+    // Jumlah mengikuti saringan lain (wilayah, kata cari, media satunya) tetapi tidak dirinya sendiri
     // Butir yang medianya belum termuat (undefined) tidak dihitung sebagai Ada maupun Tanpa
+    const pass = filterPredicate(key);
     const n = State.mediaLoaded
-      ? all.filter(r => r[field] !== undefined && !!r[field] === (state !== 'without')).length : null;
+      ? all.filter(r => pass(r) && r[field] !== undefined && !!r[field] === (state !== 'without')).length : null;
     setLabel(btn, msg(state === 'without' ? withoutKey : hasKey), n, !!state);
   };
-  setLabel(DOM.btnSemua, msg('filter-all'), all.length, !hasFilter());
-  media(DOM.btnArtikel, f.article, 'articleTitle', 'filter-has-article', 'filter-no-article');
-  media(DOM.btnGambar,  f.image,   'imageFilename', 'filter-has-photo',  'filter-no-photo');
+  // Semua: tanpa jumlah — sudah jelas mencakup seluruh hasil
+  setLabel(DOM.btnSemua, msg('filter-all'), undefined, !hasFilter());
+  media(DOM.btnArtikel, f.article, 'articleTitle', 'article', 'filter-has-article', 'filter-no-article');
+  media(DOM.btnGambar,  f.image,   'imageFilename', 'image', 'filter-has-photo',  'filter-no-photo');
+  updateRegionCounts();
 }
 
 // Data gambar/artikel tersedia → aktifkan tombol Artikel/Foto beserta jumlahnya

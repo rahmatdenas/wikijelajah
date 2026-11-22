@@ -519,6 +519,7 @@
 	"add-item": "Tooltip and dialog title of the \"+\" button in the results navigation bar (adding a new Wikidata item; feature not available yet).",
 	"add-item-soon": "Dialog text shown when clicking the \"+\" button ({{msg-wm|Add-item}}) while the feature is not available yet.",
 	"results-count": "Number of results. $1 = count.",
+	"more-locations": "Shown after the first two locations of an item located in several places, e.g. \"Palembang, Tanjungpinang +5 more\". $1 = number of remaining locations.",
 	"results-none-hint": "Hint shown when a search has no results.",
 	"sort-label": "Accessible label of the sort dropdown.",
 	"filter-label": "Accessible label of the result filter buttons.",

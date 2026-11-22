@@ -519,6 +519,7 @@
 	"add-item": "Tambah butir baru",
 	"add-item-soon": "Fitur menambah butir baru ke Wikidata langsung dari WikiJelajah sedang disiapkan.",
 	"results-count": "{{formatnum:$1}} hasil",
+	"more-locations": "+{{formatnum:$1}} lainnya",
 	"results-none-hint": "Coba kategori lain atau perluas wilayahnya.",
 	"sort-label": "Urutan",
 	"filter-label": "Tampilkan",

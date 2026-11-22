@@ -519,6 +519,7 @@
 	"add-item": "Add a new item",
 	"add-item-soon": "Adding new items to Wikidata directly from WikiJelajah is coming soon.",
 	"results-count": "{{formatnum:$1}} {{PLURAL:$1|result|results}}",
+	"more-locations": "+{{formatnum:$1}} more",
 	"results-none-hint": "Try another category or a wider region.",
 	"sort-label": "Sort order",
 	"filter-label": "Show",

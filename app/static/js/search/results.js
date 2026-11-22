@@ -13,6 +13,8 @@ let _listObserver = null;  // mengamati penanda di bawah daftar (#hasil-end)
 function finishBuildResults() {
   _listBuilt = true;
   const allIds = State.sortedIds; // sudah diisi saat row masuk
+  const regionQid = stripWd(State.params?.provQid || '');
+  allIds.forEach(q => { State.records[q].lokasi = tidyLokasi(State.records[q], regionQid); });
 
   // Populasi filter wilayah (semua provinsi tiap butir)
   const provMap = {};
@@ -20,30 +22,89 @@ function finishBuildResults() {
     const r = State.records[q];
     r.provQids.forEach((p, i) => { if (r.provLabels[i]) provMap[p] = r.provLabels[i]; });
   });
+  // data-label: nama tanpa jumlah; teks opsinya diisi updateRegionCounts
   const provOpts = Object.entries(provMap)
     .sort((a, b) => a[1].localeCompare(b[1]))
-    .map(([v, l]) => `<option value="${v}">${escHtml(l)}</option>`)
+    .map(([v, l]) => `<option value="${v}" data-label="${escHtml(l)}">${escHtml(l)}</option>`)
     .join('');
+  const allLabel = escHtml(msg('filter-all-regions'));
   if (DOM.filterWilayah)
-    DOM.filterWilayah.innerHTML = `<option value="all">${escHtml(msg('filter-all-regions'))}</option>` + provOpts;
+    DOM.filterWilayah.innerHTML = `<option value="all" data-label="${allLabel}">${allLabel}</option>` + provOpts;
 
   // Kotak cari & filter baru muncul setelah ada data yang bisa disaring
   $('filter-header')?.classList.remove('hidden');
   applySort(DOM.filterUrut?.value || 'nama');
 }
 
-function applyFilter() {
+/**
+ * Lokasi spesifik butir, tanpa lokasi yang hanya wilayah induk lokasi lain atau wilayah yang dicari
+ * (mis. P131 = Medan dan Sumatera Utara → Medan saja). Urutannya sesuai hasil query.
+ * @returns {Array<{qid: string, label: string, regions: string[]}>}  regions = QID opsi filter wilayah yang memuatnya
+ */
+function tidyLokasi(r, regionQid) {
+  const all = Object.entries(r.lokasiRaw || {}).map(([qid, [label, regions]]) => ({ qid, label, regions }));
+  const parents = new Set(all.flatMap(l => l.regions.filter(p => p !== l.qid)));
+  const specific = all.filter(l => l.qid !== regionQid && !parents.has(l.qid));
+  return specific.length ? specific : all;
+}
+
+const isMultiLokasi = r => (r.lokasi?.length || 0) > 1;
+
+/** Subjudul butir di daftar/grid/popup: lokasi · tahun. */
+const itemSub = r => [lokasiText(r), r.yearStr].filter(Boolean).join(' · ');
+
+/** Teks lokasi ringkas: "Medan", atau "Palembang, Tanjungpinang +5 lainnya" untuk butir berlokasi banyak. */
+function lokasiText(r) {
+  const list = r.lokasi || [];
+  if (list.length < 2) return list[0]?.label || r.lokLabel || r.provLabel;
+  // Lokasi di wilayah yang sedang disaring didahulukan: jelas kenapa butir ini muncul di filter itu
+  const w = State.filter.wilayah;
+  const sorted = w === 'all' ? list
+    : [...list.filter(l => l.regions.includes(w)), ...list.filter(l => !l.regions.includes(w))];
+  const names = sorted.slice(0, 2).map(l => l.label).join(', ');
+  return list.length > 2 ? `${names} ${msg('more-locations', list.length - 2)}` : names;
+}
+
+/**
+ * Penyaring butir sesuai State.filter. `skip` ('wilayah' | 'image' | 'article') mengabaikan satu saringan,
+ * agar jumlah per pilihan saringan itu mengikuti saringan lain tetapi tidak dirinya sendiri.
+ */
+function filterPredicate(skip = null) {
   const { wilayah, image, article, search } = State.filter;
   const q = search.toLowerCase();
-
-  State.visibleIds = State.sortedIds.filter(id => {
-    const r = State.records[id];
-    if (wilayah !== 'all' && !r.provQids.includes(wilayah)) return false;
-    if (image   && (r.imageFilename === undefined || !!r.imageFilename !== (image === 'has')))  return false;
-    if (article && (r.articleTitle  === undefined || !!r.articleTitle  !== (article === 'has'))) return false;
-    if (q && ![r.title, r.lokLabel, ...r.provLabels].some(t => t?.toLowerCase().includes(q))) return false;
+  return r => {
+    if (skip !== 'wilayah' && wilayah !== 'all' && !r.provQids.includes(wilayah)) return false;
+    if (skip !== 'image'   && image   && (r.imageFilename === undefined || !!r.imageFilename !== (image === 'has')))  return false;
+    if (skip !== 'article' && article && (r.articleTitle  === undefined || !!r.articleTitle  !== (article === 'has'))) return false;
+    if (q && ![r.title, r.lokLabel, ...r.provLabels, ...(r.lokasi || []).map(l => l.label)]
+      .some(t => t?.toLowerCase().includes(q))) return false;
     return true;
+  };
+}
+
+/** Jumlah butir di setiap opsi filter wilayah, mis. "Kota Medan (30)". */
+function updateRegionCounts() {
+  if (!_listBuilt || !DOM.filterWilayah) return;
+  const pass = filterPredicate('wilayah');
+  const counts = {};
+  let total = 0;
+  State.sortedIds.forEach(id => {
+    const r = State.records[id];
+    if (!pass(r)) return;
+    total++;
+    // Butir berlokasi banyak dihitung di setiap wilayahnya (jumlah opsi bisa melebihi total)
+    new Set(r.provQids).forEach(p => { counts[p] = (counts[p] || 0) + 1; });
   });
+  [...DOM.filterWilayah.options].forEach(o => {
+    if (o.dataset.label === undefined) return;
+    const n = o.value === 'all' ? total : counts[o.value] || 0;
+    o.textContent = `${o.dataset.label} (${formatNumber(n)})`;
+  });
+}
+
+function applyFilter() {
+  const pass = filterPredicate();
+  State.visibleIds = State.sortedIds.filter(id => pass(State.records[id]));
 
   renderList();
   updateSearchPlaceholder();
@@ -130,7 +191,7 @@ function renderListItem(qid, index) {
   li.dataset.qid = qid;
   li.dataset.index = index;
 
-  const sub = [r.lokLabel || r.provLabel, r.yearStr].filter(Boolean).join(' · ');
+  const sub = itemSub(r);
   const thumb = r.imageFilename
     ? `<img class="result-thumb" src="${commonsFileUrl(r.imageFilename, 120)}" alt="" loading="lazy">`
     : `<span class="result-thumb result-thumb--empty" aria-hidden="true"></span>`;
@@ -157,7 +218,7 @@ function renderGridItem(qid, index) {
   li.dataset.qid = qid;
   li.dataset.index = index;
 
-  const sub = [r.lokLabel || r.provLabel, r.yearStr].filter(Boolean).join(' · ');
+  const sub = itemSub(r);
   const isRawQid = /^Q\d+$/.test(r.title);
   const displayTitle = isRawQid ? r.id : r.title;
 
@@ -204,9 +265,14 @@ function applySort(key) {
       if (d) return d;
     }
     if (key === 'wilayah') {
-      // Abjad lokasi spesifik (Aceh, Alor, Ambon, Anyer…), bukan provinsinya
-      const c = (ra.lokLabel || ra.provLabel || '').localeCompare(rb.lokLabel || rb.provLabel || '');
-      if (c) return c;
+      // Butir berlokasi banyak dikumpulkan paling atas (urut nama), lalu abjad lokasi spesifik
+      // (Aceh, Alor, Ambon, Anyer…), bukan provinsinya
+      const m = isMultiLokasi(rb) - isMultiLokasi(ra);
+      if (m) return m;
+      if (!isMultiLokasi(ra)) {
+        const c = (lokasiText(ra) || '').localeCompare(lokasiText(rb) || '');
+        if (c) return c;
+      }
     }
     return (ra.title || '').localeCompare(rb.title || '');
   });

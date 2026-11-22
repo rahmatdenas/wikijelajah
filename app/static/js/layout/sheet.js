@@ -136,7 +136,7 @@ function initBottomSheet() {
 // MAP POPUP HTML
 // ---------------------------------------------------------------------------
 function buildMapPopupHtml(r) {
-  const sub = [r.lokLabel || r.provLabel, r.yearStr].filter(Boolean).join(' · ');
+  const sub = itemSub(r);
   const imgHtml = r.imageFilename
     ? `<img class="map-popup-img" src="${commonsFileUrl(r.imageFilename, 200)}" alt="" loading="lazy">`
     : '';

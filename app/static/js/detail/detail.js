@@ -54,7 +54,7 @@ function renderDetail(qid) {
   const kategoriNama  = State.params?.klasterLabel || '';
   const isRawQid      = /^Q\d+$/.test(r.title);
   const createWikiUrl = `${WIKI_BASE}/w/index.php?title=${encodeURIComponent(r.title)}&action=edit`;
-  const sub = [r.lokLabel || r.provLabel, r.yearStr].filter(Boolean).join(' · ');
+  const sub = itemSub(r);
 
   // Catatan bila belum ada artikel Wikipedia / belum ada label
   const articleNote = r.articleTitle ? ''
