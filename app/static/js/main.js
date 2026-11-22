@@ -135,6 +135,7 @@ document.addEventListener('DOMContentLoaded', () => {
   // Aturan jenis subjek properti gambar diambil sekali di awal, agar pengecekan di detail lebih cepat
   if (APP_USER) fetchImagePropClasses(IMAGE_PROPS).catch(() => {});
   initLinkPhotoModal();
+  initFavorites();
 
   // Landing default; tautan yang membawa pencarian langsung dijalankan
   showSection('landing');

@@ -252,6 +252,25 @@ select option { color: var(--color-text); }
 
 #btn-jelajahi { margin-top: var(--space-2); }
 
+/* Penjelajahan favorit (di bawah tombol Jelajahi): kotak sama dengan .last-results, × di dalam kotak */
+.favorites { margin-top: var(--space-5); }
+.favorites-title { margin: 0 0 var(--space-2); font-size: var(--text-sm); font-weight: 600; color: var(--color-text-muted); }
+.favorites-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.favorite-item { position: relative; }
+.favorite-item .favorite-open { padding-top: var(--space-2); padding-bottom: var(--space-2); padding-right: 40px; overflow-wrap: anywhere; }
+.favorite-remove {
+  position: absolute; top: 50%; right: var(--space-2); transform: translateY(-50%);
+  width: 28px; height: 28px; border: 0; border-radius: var(--radius-full); background: none;
+  color: var(--color-accent-muted); font-size: 17px; line-height: 1; cursor: pointer;
+}
+.favorite-remove:hover, .favorite-remove:focus-visible { color: var(--color-error); background: var(--color-surface); }
+
+/* Bintang favorit di panel hasil: garis = belum disimpan, terisi = sudah */
+.favorite-toggle .favorite-on,
+.favorite-toggle.is-favorite .favorite-off { display: none; }
+.favorite-toggle.is-favorite .favorite-on { display: inline; }
+.favorite-toggle.is-favorite { color: var(--color-accent-text); border-color: var(--color-accent); background: var(--color-accent-bg); }
+
 /* Wilayah bebas: saran & status */
 .wilayah-field { display: block; }
 .wilayah-field .prop-suggest { width: 100%; max-width: none; }

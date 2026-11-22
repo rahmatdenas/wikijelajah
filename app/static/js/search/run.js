@@ -187,6 +187,7 @@ async function startSearch() {
 
   mapClear();
   resetHasilUI();
+  updateFavoriteButton();
   showSection('hasil');
 
   // ===== CEK CACHE SESI =====
