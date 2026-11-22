@@ -196,9 +196,14 @@ KATEGORI_DATA = [
             ('wd:Q7075', 'Perpustakaan', 'category-libraries', {}),
             ('wd:Q22746 wd:Q174782', 'Ruang terbuka hijau', 'category-parks', {'data-kategori': 'alam'}),
             ('wd:Q16917', 'Rumah sakit', 'category-hospitals', {}),
-            ('wd:Q3914 wd:Q9842 wd:Q159334 wd:Q189004', 'Sekolah', 'category-schools', {}),
+            # Sekolah dipecah per jenjang: hampir semua sekolah di Wikidata punya P31 jenjang (selain negeri/swasta),
+            # dan satu kategori berisi semuanya (±230 ribu butir) terlalu berat untuk query
+            ('wd:Q97042318 wd:Q9842 wd:Q12496022', 'SD & MI', 'category-schools-primary', {}),
+            ('wd:Q97500812 wd:Q12496021', 'SMP & MTs', 'category-schools-junior', {}),
+            ('wd:Q97598588 wd:Q9826 wd:Q322563 wd:Q12496019', 'SMA, SMK & MA', 'category-schools-senior', {}),
+            ('wd:Q1110689 wd:Q126807 wd:Q3914 wd:Q159334', 'Sekolah lainnya', 'category-schools-other', {}),
             ('wd:Q483110 wd:Q2310214', 'Stadion & lapangan olahraga', 'category-stadiums', {}),
-            ('wd:Q3918 wd:Q38723', 'Universitas & kampus', 'category-universities', {}),
+            ('wd:Q3918 wd:Q38723 wd:Q12513145 wd:Q1664720 wd:Q189004', 'Universitas & kampus', 'category-universities', {}),
         ],
     },
     {
@@ -214,7 +219,7 @@ KATEGORI_DATA = [
         'group': 'category-group-nature',
         'items': [
             ('wd:Q34038', 'Air terjun', 'category-waterfalls', {'data-kategori': 'alam'}),
-            ('wd:Q179049', 'Cagar alam', 'category-nature-reserves', {'data-kategori': 'alam'}),
+            ('wd:Q179049 wd:Q473972 wd:Q1367500 wd:Q7251271', 'Cagar alam', 'category-nature-reserves', {'data-kategori': 'alam'}),
             ('wd:Q23397 wd:Q204324 wd:Q159954', 'Danau & kaldera', 'category-lakes', {'data-kategori': 'alam'}),
             ('wd:Q35509', 'Gua', 'category-caves', {'data-kategori': 'alam'}),
             ('wd:Q8502', 'Gunung', 'category-mountains', {'data-kategori': 'alam'}),

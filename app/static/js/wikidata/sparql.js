@@ -151,7 +151,7 @@ const KLASTER_TANPA_KOORDINAT_LANGSUNG = new Set([
 
 const KLASTER_KHUSUS_NASIONAL = new Set([
   'Kabupaten dan kota', 'Gempa bumi dan tsunami',
-  'Peristiwa lainnya', 'Publikasi', 'Lukisan',
+  'Peristiwa lainnya', 'Publikasi', 'Lukisan', 'Cagar alam',
 ]);
 
 // ---------------------------------------------------------------------------

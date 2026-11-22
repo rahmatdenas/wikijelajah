@@ -138,6 +138,11 @@ const SKEMA_KATEGORI = (A => ({
   'Perpustakaan':                [A.lokasi, A.didirikan, A.koleksiJumlah, A.pengelola, A.laman],
   'Ruang terbuka hijau':         [A.lokasi, A.didirikan, A.luas, A.pengelola],
   'Rumah sakit':                 [A.lokasi, A.didirikan, A.ranjang, A.pengelola, A.laman],
+  'SD & MI':                     [A.lokasi, A.didirikan, A.pelajar, A.pengelola, A.laman],
+  'SMP & MTs':                   [A.lokasi, A.didirikan, A.pelajar, A.pengelola, A.laman],
+  'SMA, SMK & MA':               [A.lokasi, A.didirikan, A.pelajar, A.pengelola, A.laman],
+  'Sekolah lainnya':             [A.lokasi, A.didirikan, A.pelajar, A.pengelola, A.laman],
+  // Kategori lama (sebelum dipecah per jenjang): kandidat Perkaya Data yang sudah tersimpan masih memakainya
   'Sekolah':                     [A.lokasi, A.didirikan, A.pelajar, A.pengelola, A.laman],
   'Stadion & lapangan olahraga': [A.lokasi, A.didirikan, A.kapasitas, A.penghuniKlub, A.permukaan],
   'Universitas & kampus':        [A.lokasi, A.didirikan, A.pelajar, A.rektor, A.laman],
