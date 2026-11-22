@@ -85,6 +85,35 @@ WHERE {
   SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
 }`;
 
+// Di sekitar lokasi pengguna: semua objek berkoordinat dalam radius, tanpa kategori.
+// ?p diisi jenis objek (P31) agar filter hasil menjadi filter jenis; koordinat & jarak ikut diambil.
+const _T_ITEMS_NEARBY = `SELECT DISTINCT ?SQ ?sLabel ?PQ ?pLabel ?LQ ?lLabel ?tM ?tP ?coord ?dist
+WHERE {
+  {
+    SELECT DISTINCT ?s ?p ?l ?coord ?dist WHERE {
+      SERVICE wikibase:around {
+        ?s wdt:P625 ?coord .
+        bd:serviceParam wikibase:center "Point(<LON> <LAT>)"^^geo:wktLiteral ;
+                        wikibase:radius "<RADIUS>" ;
+                        wikibase:distance ?dist .
+      }
+      OPTIONAL { ?s wdt:P31 ?p . }
+      OPTIONAL { ?s wdt:P131 ?l . }
+    }
+    ORDER BY ?s ?p ?l
+    LIMIT <LIMIT> OFFSET <OFFSET>
+  }
+  OPTIONAL {
+    ?s p:<PROP_TAHUN> ?iS .
+    ?iS psv:<PROP_TAHUN> ?iN .
+    ?iN wikibase:timeValue ?tM ; wikibase:timePrecision ?tP .
+  }
+  BIND(SUBSTR(STR(?s),32) AS ?SQ)
+  BIND(SUBSTR(STR(?p),32) AS ?PQ)
+  BIND(SUBSTR(STR(?l),32) AS ?LQ)
+  SERVICE wikibase:label { bd:serviceParam wikibase:language "${WD_LANGS.join(',')}". }
+}`;
+
 const _T_ITEMS_ABROAD = `SELECT DISTINCT ?SQ ?sLabel ?PQ ?pLabel ?LQ ?lLabel ?tM ?tP
 WHERE {
   {
@@ -162,7 +191,8 @@ const KLASTER_KHUSUS_NASIONAL = new Set([
  * Bangun SPARQL query halaman tunggal dari parameter pencarian.
  * @param {Object}  p
  * @param {string}  p.jenis        - Q-IDs (e.g. "wd:Q32815 wd:Q56235676")
- * @param {string}  p.wilayah      - 'provinsi' | 'all' | 'luar_negeri'
+ * @param {string}  p.wilayah      - 'provinsi' | 'all' | 'luar_negeri' | 'sekitar'
+ * @param {number}  p.lat, p.lon, p.radius - titik pusat & radius (km), hanya untuk 'sekitar'
  * @param {string}  p.provQid      - QID provinsi (e.g. "wd:Q3724")
  * @param {string}  p.negaraQid    - QID negara (e.g. "wd:Q17")
  * @param {string}  p.propLokasi   - default 'P131'
@@ -176,7 +206,7 @@ function buildItemsQuery(p) {
   const {
     jenis, wilayah, provQid = '', negaraQid = '', wilayahNegaraQid = '',
     propLokasi = 'P131', propTahun = 'P571', klasterNama = 'Objek',
-    useSubclass = false,
+    useSubclass = false, lat, lon, radius,
     limit = WD_PAGE_SIZE, offset = 0,
   } = p;
 
@@ -188,6 +218,15 @@ function buildItemsQuery(p) {
 
   const fill = (tpl, vars) =>
     Object.entries(vars).reduce((s, [k, v]) => s.replace(new RegExp(k, 'g'), v), tpl);
+
+  // --- Di sekitar lokasi pengguna ---
+  if (wilayah === 'sekitar') {
+    return fill(_T_ITEMS_NEARBY, {
+      '<LAT>': lat, '<LON>': lon, '<RADIUS>': radius,
+      '<PROP_TAHUN>': propTahun,
+      '<LIMIT>': limit, '<OFFSET>': offset,
+    });
+  }
 
   // --- Luar negeri ---
   if (wilayah === 'luar_negeri') {

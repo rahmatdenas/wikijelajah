@@ -19,7 +19,9 @@ function renderDynPropsHtml(qid, detail, klasterNama = '') {
     `<li class="detail-data-row"><span class="detail-info-key">${escHtml(key)}</span><span class="detail-info-val">${valHtml}</span></li>`;
   const items = [];
 
-  const prov = r?.provLabels?.length ? r.provLabels.join(', ') : r?.provLabel;
+  // "Di sekitar saya": provLabels berisi jenis objek (sudah tampil di baris Tipe), bukan wilayah
+  const prov = State.params?.wilayah === 'sekitar' ? ''
+    : r?.provLabels?.length ? r.provLabels.join(', ') : r?.provLabel;
   if (prov) items.push(row(msg('region-label'), escHtml(prov)));
   if (detail.tipe) {
     const tipe = detail.tipe.split(', ').map(k => k.charAt(0).toUpperCase() + k.slice(1)).join(', ');

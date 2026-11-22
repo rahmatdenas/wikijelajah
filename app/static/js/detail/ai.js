@@ -55,7 +55,9 @@ async function aiSearchRow(qid, li) {
     const { ok, status, data } = await aiSearch({
       qid, label: r.title, description: r._detail?.description || '',
       kategori: State.params?.klasterNama || '',
-      lokasi: [r.lokLabel, ...(r.provLabels || [r.provLabel])].filter((v, i, a) => v && a.indexOf(v) === i).join(', '),
+      // "Di sekitar saya": provLabels berisi jenis objek, bukan wilayah
+      lokasi: [r.lokLabel, ...(State.params?.wilayah === 'sekitar' ? [] : r.provLabels || [r.provLabel])]
+        .filter((v, i, a) => v && a.indexOf(v) === i).join(', '),
     }, attr);
     if (!li.isConnected) return true;
     btn.disabled = false;

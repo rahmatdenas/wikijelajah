@@ -41,6 +41,7 @@ function mapMarkerStatus(record) {
 let _map = null;
 let _cluster = null;
 let _shapeLayer = null;
+let _areaLayer = null;  // lingkaran radius pencarian "Di sekitar saya"
 let _flyToSeq = 0;
 
 /**
@@ -140,6 +141,18 @@ function mapClear() {
     _map.removeLayer(_shapeLayer);
     _shapeLayer = null;
   }
+  if (_areaLayer) {
+    _map.removeLayer(_areaLayer);
+    _areaLayer = null;
+  }
+}
+
+/** Lingkaran radius pencarian (km) di sekitar titik pusat. */
+function mapShowArea(lat, lon, km) {
+  if (_areaLayer) _map.removeLayer(_areaLayer);
+  _areaLayer = L.circle([lat, lon], {
+    radius: km * 1000, color: 'var(--color-primary,#8a1414)', weight: 1.5, fillOpacity: 0.04, interactive: false,
+  }).addTo(_map);
 }
 
 function mapBuildMarker(record) {

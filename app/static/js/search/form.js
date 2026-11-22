@@ -10,6 +10,10 @@ function updateFormVisibility() {
   DOM.wadahProvinsi.classList.toggle('hidden', tipe !== 'provinsi');
   DOM.wadahLuarNegeri.classList.toggle('hidden', tipe !== 'luar_negeri');
   DOM.wadahQidWilayah?.classList.toggle('hidden', tipe !== 'qid');
+  // "Di sekitar saya" mengambil semua objek: pilihan kategori disembunyikan
+  $('wadah-sekitar')?.classList.toggle('hidden', tipe !== 'sekitar');
+  $('wadah-kategori')?.classList.toggle('hidden', tipe === 'sekitar');
+  $('wadah-qid')?.classList.toggle('hidden', tipe === 'sekitar' || DOM.selectKategori.value !== 'custom');
   if (tipe === 'qid' && !DOM.inputQidWilayah.value) DOM.inputQidWilayah.focus();
 }
 
@@ -166,10 +170,18 @@ function selectKategoriBySlug(slug) {
 
 /**
  * Isi form dari URL (tautan dari Perkaya Data, top nav, atau tautan yang dibagikan) lalu langsung cari.
- * ?region=province|all|abroad|area&province=Q..&country=Q..&area=Q..&category=<slug>
+ * ?region=province|all|abroad|area&province=Q..&country=Q..&area=Q..&category=<slug>, atau ?region=nearby&radius=5
  */
 function applyQueryParams() {
   const q = new URLSearchParams(location.search);
+  // "Di sekitar saya": tanpa koordinat — lokasi diambil dari GPS orang yang membuka tautan
+  if (q.get('region') === 'nearby') {
+    DOM.selectTipe.value = 'sekitar';
+    const radius = $('select-radius');
+    if (radius && [...radius.options].some(o => o.value === q.get('radius'))) radius.value = q.get('radius');
+    updateFormVisibility();
+    return true;
+  }
   if (!selectKategoriBySlug(q.get('category'))) return false;
   const tipe = REGION_FROM_PARAM[q.get('region')] || 'provinsi';
   DOM.selectTipe.value = tipe;

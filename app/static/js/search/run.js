@@ -41,7 +41,7 @@ const _CACHE_TTL = 30 * 60 * 1000;
 
 function _cacheKey(p) {
   // Bahasa ikut kunci: label & judul artikel Wikipedia berbeda per bahasa
-  return `wj6:${I18N.lang}:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}`;
+  return `wj6:${I18N.lang}:${p.jenis}:${p.wilayah}:${p.provQid}:${p.negaraQid}:${p.lat ?? ''}:${p.lon ?? ''}:${p.radius ?? ''}`;
 }
 
 function _loadCache(key) {
@@ -68,6 +68,21 @@ function _saveCache(key, records, sortedIds) {
   } catch {} // abaikan jika kuota penuh
 }
 
+/**
+ * Posisi pengguna dari GPS browser, dibulatkan ke 3 desimal (±100 m): hanya posisi
+ * bulat ini yang dikirim ke layanan kueri Wikidata.
+ */
+function getUserPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error(msg('nearby-unsupported'))); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: +pos.coords.latitude.toFixed(3), lon: +pos.coords.longitude.toFixed(3) }),
+      err => reject(new Error(msg(err.code === err.PERMISSION_DENIED ? 'nearby-denied' : 'nearby-unavailable'))),
+      { enableHighAccuracy: false, timeout: 15000, maximumAge: 5 * 60 * 1000 },
+    );
+  });
+}
+
 // ---------------------------------------------------------------------------
 // TARIK DATA — FLOW UTAMA
 // Alur: langsung tampil panel hasil → item masuk progresif → marker di map
@@ -77,8 +92,9 @@ async function startSearch() {
   const provQid   = DOM.selectProvinsi.value;
   const negaraQid = DOM.selectNegara.value;
   const opt       = DOM.selectKategori.options[DOM.selectKategori.selectedIndex];
+  const nearby    = tipe === 'sekitar';  // tanpa kategori: semua objek di sekitar lokasi GPS
 
-  if (!opt || !opt.value) {
+  if (!nearby && (!opt || !opt.value)) {
     appShowDialog(escHtml(msg('category-required')), 'alert', msg('dialog-attention'));
     return;
   }
@@ -121,6 +137,28 @@ async function startSearch() {
     negaraQid: tipe === 'luar_negeri' ? negaraQid : '',
   };
 
+  if (nearby) {
+    const btn = DOM.btnJelajahi, btnText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = msg('nearby-locating');
+    let pos;
+    try {
+      pos = await getUserPosition();
+    } catch (err) {
+      appShowDialog(escHtml(err.message), 'alert', msg('dialog-attention'));
+      return;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = btnText;
+    }
+    const radius = Number($('select-radius')?.value) || 5;
+    Object.assign(params, {
+      jenis: '', klasterNama: '', klasterSlug: '', klasterLabel: msg('nearby-all-objects'),
+      propLokasi: 'P131', propTahun: 'P571', useSubclass: false,
+      wilayah: 'sekitar', wilayahNama: msg('nearby-area', radius), ...pos, radius,
+    });
+  }
+
   // Bawa konteks ke URL (bisa dibagikan) dan top nav
   const ctx = searchContext(params);
   if (ctx) {
@@ -128,6 +166,9 @@ async function startSearch() {
     const q = new URLSearchParams(contextQuery(ctx));
     if (ctx.area) q.set('area_label', wilayahNama);
     history.replaceState(null, '', `${location.pathname}?${q}`);
+  } else if (nearby) {
+    // Tanpa koordinat: tautan ini mencari di sekitar siapa pun yang membukanya
+    history.replaceState(null, '', `${location.pathname}?region=nearby&radius=${params.radius}`);
   }
 
   // Reset state
@@ -156,6 +197,7 @@ async function startSearch() {
     State.sortedIds   = cached.sortedIds;
     setMediaReady();
     finishBuildResults();
+    if (nearby) mapShowArea(params.lat, params.lon, params.radius);
     Object.values(State.records).forEach(r => mapBuildMarker(r));
     syncMapMarkers({ force: true });
     mapFitAll();
@@ -163,7 +205,7 @@ async function startSearch() {
     return;
   }
 
-  setLoadingStatus(msg('loading-category', klasterLabel, wilayahNama));
+  setLoadingStatus(msg('loading-category', params.klasterLabel, params.wilayahNama));
 
   try {
     // ===== FASE 1: Item + koordinat langsung dari SPARQL =====
@@ -194,13 +236,19 @@ async function startSearch() {
         const lok = rec.lokasiRaw[lQid] ||= [row.lLabel?.value || '', []];
         if (pQid && !lok[1].includes(pQid)) lok[1].push(pQid);
       }
+      // "Di sekitar saya": koordinat & jarak (km) sudah ikut di query
+      if (row.coord && rec.lat === undefined) {
+        const bits = row.coord.value.split(/[() ]/);
+        rec.lon = parseFloat(bits[1]); rec.lat = parseFloat(bits[2]);
+      }
+      if (row.dist) rec.dist = Math.min(rec.dist ?? Infinity, parseFloat(row.dist.value));
       if (pQid && !rec.provQids.includes(pQid)) {
         rec.provQids.push(pQid);
         rec.provLabels.push(pLabel);
         if (!rec.provQid) { rec.provQid = pQid; rec.provLabel = pLabel; }
       }
     }, total => {
-      setLoadingStatus(msg('loading-category-count', klasterLabel, wilayahNama, total));
+      setLoadingStatus(msg('loading-category-count', params.klasterLabel, params.wilayahNama, total));
       // Tombol "Cukupkan" baru muncul bila data sudah cukup banyak
       if (total >= CUKUPKAN_MIN_DATA) $('cukupkan-wrap')?.classList.remove('hidden');
     }, { stopSignal: State.stopCtrl.signal, keepPartial: true });
@@ -224,7 +272,15 @@ async function startSearch() {
     setLoadingStatus(null);
 
     // ===== FASE 2: Koordinat (bisa dihentikan; batch yang sudah masuk tetap dipakai) =====
-    await loadCoordinates(allQids, signal, { fitMap: true });
+    if (nearby) {
+      // Koordinat sudah ada dari query radius
+      Object.values(State.records).forEach(r => mapBuildMarker(r));
+      mapShowArea(params.lat, params.lon, params.radius);
+      syncMapMarkers({ force: true });
+      mapFitAll();
+    } else {
+      await loadCoordinates(allQids, signal, { fitMap: true });
+    }
 
     // ===== FASE 3: Media (background), sesuai urutan tampil: butir teratas dapat gambar lebih dulu =====
     loadMediaBackground([...State.sortedIds], signal);
@@ -327,6 +383,7 @@ function resetHasilUI() {
   if (end) { end.textContent = ''; end.classList.add('hidden'); _listObserver?.unobserve(end); }
   if (DOM.filterWilayah) DOM.filterWilayah.innerHTML = `<option value="all">${escHtml(msg('filter-all-regions'))}</option>`;
   if (DOM.filterUrut) DOM.filterUrut.innerHTML = `
+    ${State.params?.wilayah === 'sekitar' ? `<option value="jarak">${escHtml(msg('sort-distance'))}</option>` : ''}
     <option value="nama">${escHtml(msg('sort-name'))}</option>
     <option value="wilayah">${escHtml(msg('sort-region'))}</option>
     <option value="tahun">${escHtml(msg('sort-year'))}</option>

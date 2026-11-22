@@ -32,7 +32,8 @@
       <label class="form-label" for="select-wilayah-tipe">{{ msg('region-label') }}</label>
       <select id="select-wilayah-tipe" class="form-select">
         {% for value, key in [('provinsi', 'region-opt-province'), ('all', 'region-opt-all'),
-                              ('luar_negeri', 'region-opt-abroad'), ('qid', 'region-opt-area')] %}
+                              ('luar_negeri', 'region-opt-abroad'), ('qid', 'region-opt-area'),
+                              ('sekitar', 'region-opt-nearby')] %}
         <option value="{{ value }}">{{ msg(key) }}</option>
         {% endfor %}
       </select>
@@ -74,8 +75,19 @@
       <small id="qid-wilayah-info" class="qid-wilayah-info">{{ msg('region-search-hint') }}</small>
     </div>
 
+    {# Di sekitar saya — semua objek berkoordinat dalam radius dari lokasi GPS pengguna #}
+    <div id="wadah-sekitar" class="form-group hidden">
+      <label class="form-label" for="select-radius">{{ msg('nearby-radius-label') }}</label>
+      <select id="select-radius" class="form-select">
+        {% for km in [1, 5, 10] %}
+        <option value="{{ km }}"{% if km == 5 %} selected{% endif %}>{{ msg('nearby-radius-option', km) }}</option>
+        {% endfor %}
+      </select>
+      <small class="qid-wilayah-info">{{ msg('nearby-hint') }}</small>
+    </div>
+
     {# Kategori #}
-    <div class="form-group">
+    <div id="wadah-kategori" class="form-group">
       <label class="form-label" for="select-kategori">{{ msg('category-label') }}</label>
       <select id="select-kategori" class="form-select">
         <option disabled selected value="">— {{ msg('category-placeholder') }} —</option>

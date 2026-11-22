@@ -27,7 +27,8 @@ function finishBuildResults() {
     .sort((a, b) => a[1].localeCompare(b[1]))
     .map(([v, l]) => `<option value="${v}" data-label="${escHtml(l)}">${escHtml(l)}</option>`)
     .join('');
-  const allLabel = escHtml(msg('filter-all-regions'));
+  // "Di sekitar saya": opsi filter berisi jenis objek (P31), bukan wilayah
+  const allLabel = escHtml(msg(State.params?.wilayah === 'sekitar' ? 'filter-all-types' : 'filter-all-regions'));
   if (DOM.filterWilayah)
     DOM.filterWilayah.innerHTML = `<option value="all" data-label="${allLabel}">${allLabel}</option>` + provOpts;
 
@@ -50,8 +51,15 @@ function tidyLokasi(r, regionQid) {
 
 const isMultiLokasi = r => (r.lokasi?.length || 0) > 1;
 
-/** Subjudul butir di daftar/grid/popup: lokasi · tahun. */
-const itemSub = r => [lokasiText(r), r.yearStr].filter(Boolean).join(' · ');
+/** Jarak dari lokasi pengguna ("350 m", "1,2 km"); hanya ada pada hasil "Di sekitar saya". */
+function distanceText(r) {
+  if (r.dist === undefined) return '';
+  return r.dist < 1 ? msg('distance-m', formatNumber(Math.round(r.dist * 1000)))
+    : msg('distance-km', formatNumber(r.dist, { maximumFractionDigits: 1 }));
+}
+
+/** Subjudul butir di daftar/grid/popup: jarak · lokasi · tahun. */
+const itemSub = r => [distanceText(r), lokasiText(r), r.yearStr].filter(Boolean).join(' · ');
 
 /** Teks lokasi ringkas: "Medan", atau "Palembang, Tanjungpinang +5 lainnya" untuk butir berlokasi banyak. */
 function lokasiText(r) {
@@ -260,6 +268,10 @@ function updateSearchPlaceholder() {
 function applySort(key) {
   State.sortedIds.sort((a, b) => {
     const ra = State.records[a], rb = State.records[b];
+    if (key === 'jarak') {
+      const d = (ra.dist ?? Infinity) - (rb.dist ?? Infinity);
+      if (d) return d;
+    }
     if (key === 'tahun') {
       const d = (ra.year ?? 9999) - (rb.year ?? 9999);
       if (d) return d;
