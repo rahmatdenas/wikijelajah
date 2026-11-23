@@ -265,6 +265,17 @@ select option { color: var(--color-text); }
 }
 .favorite-remove:hover, .favorite-remove:focus-visible { color: var(--color-error); background: var(--color-surface); }
 
+/* Modal unduh hasil: format & kolom */
+.export-formats { display: flex; gap: var(--space-5); }
+.export-columns-head { display: flex; align-items: baseline; justify-content: space-between; }
+.export-select-all {
+  border: 0; background: none; padding: 0; font: inherit; font-size: var(--text-sm);
+  color: var(--color-primary); cursor: pointer;
+}
+.export-select-all:hover { text-decoration: underline; }
+.export-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2) var(--space-4); }
+.export-col { font-weight: 500; }
+
 /* Bintang favorit di panel hasil: garis = belum disimpan, terisi = sudah */
 .favorite-toggle .favorite-on,
 .favorite-toggle.is-favorite .favorite-off { display: none; }

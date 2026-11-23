@@ -143,6 +143,11 @@
           <svg class="favorite-off" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M22 9.24l-7.19-.62L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21 12 17.27 18.18 21l-1.63-7.03L22 9.24zM12 15.4l-3.76 2.27 1-4.28-3.32-2.88 4.38-.38L12 6.1l1.71 4.04 4.38.38-3.32 2.88 1 4.28L12 15.4z"/></svg>
           <svg class="favorite-on" viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
         </button>
+        {# Unduh daftar hasil yang sedang tampil (desktop saja): membuka #export-modal #}
+        <button type="button" id="btn-unduh" class="btn btn--secondary btn--sm btn--icon download-toggle"
+                aria-haspopup="dialog" title="{{ msg('export-download') }}" aria-label="{{ msg('export-download') }}">
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+        </button>
         <button type="button" class="btn btn--primary btn--sm btn--icon sheet-toggle js-sheet-toggle">
           <span class="sheet-toggle-open" title="{{ msg('sheet-show-map') }}">
             <svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg><span class="visually-hidden">{{ msg('sheet-show-map') }}</span></span>
@@ -216,6 +221,37 @@
 
 </div>{# /app-body #}
 
+{# Unduh hasil: pilih format & kolom — diisi search/export.js #}
+<div id="export-modal" class="upload-modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="export-modal-title">
+  <div class="upload-modal-box">
+    <div class="upload-modal-header">
+      <h3 id="export-modal-title">{{ msg('export-download') }}</h3>
+      <button class="upload-modal-close" id="export-modal-close" aria-label="{{ msg('button-close') }}">&times;</button>
+    </div>
+    <div class="upload-modal-body">
+      <p class="upload-hint" id="export-count"></p>
+      <div class="form-group">
+        <span class="form-label">{{ msg('export-format') }}</span>
+        <div class="export-formats">
+          <label class="upload-check"><input type="radio" name="export-format" value="xlsx" checked> {{ msg('export-xlsx') }}</label>
+          <label class="upload-check"><input type="radio" name="export-format" value="csv"> {{ msg('export-csv') }}</label>
+        </div>
+      </div>
+      <div class="form-group">
+        <div class="export-columns-head">
+          <span class="form-label">{{ msg('export-columns') }}</span>
+          <button type="button" class="export-select-all" id="export-select-all">{{ msg('export-select-all') }}</button>
+        </div>
+        <div id="export-columns" class="export-columns"></div>
+      </div>
+    </div>
+    <div class="upload-modal-footer">
+      <button class="btn btn--secondary" id="export-btn-cancel">{{ msg('button-cancel') }}</button>
+      <button class="btn btn--primary" id="export-btn-submit">{{ msg('export-submit') }}</button>
+    </div>
+  </div>
+</div>
+
 {# Overlay & dialog mode game #}
 <div id="game-overlay" class="hidden" aria-hidden="true"></div>
 <div id="game-dialog" class="hidden" role="dialog" aria-modal="true">
@@ -232,6 +268,7 @@
 <script src="{{ url_for('static', filename='js/search/run.js') }}"></script>
 <script src="{{ url_for('static', filename='js/search/results.js') }}"></script>
 <script src="{{ url_for('static', filename='js/search/favorites.js') }}"></script>
+<script src="{{ url_for('static', filename='js/search/export.js') }}"></script>
 <script src="{{ url_for('static', filename='js/detail/detail.js') }}"></script>
 <script src="{{ url_for('static', filename='js/detail/props.js') }}"></script>
 <script src="{{ url_for('static', filename='js/detail/ai.js') }}"></script>

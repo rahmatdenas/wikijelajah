@@ -136,6 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
   if (APP_USER) fetchImagePropClasses(IMAGE_PROPS).catch(() => {});
   initLinkPhotoModal();
   initFavorites();
+  initExport();
 
   // Landing default; tautan yang membawa pencarian langsung dijalankan
   showSection('landing');

@@ -64,6 +64,7 @@
 
   /* Tombol "Lihat peta" / "Lihat daftar|detail": labelnya mengikuti keadaan panel */
   .sheet-toggle { display: inline-flex; }
+  .download-toggle { display: none; }  /* unduh hasil: desktop saja */
   #panel.sheet-closed .sheet-toggle-open,
   #panel:not(.sheet-closed) .sheet-toggle-closed { display: none; }
   .sheet-toggle-open, .sheet-toggle-closed { display: inline-flex; }
