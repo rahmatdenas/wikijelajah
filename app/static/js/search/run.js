@@ -411,6 +411,7 @@ const nextMediaFilter = state => state === null ? 'has' : state === 'has' ? 'wit
 function updateFilterButtons() {
   const f   = State.filter;
   const all = State.sortedIds.map(id => State.records[id]);
+
   const setLabel = (btn, text, count, on) => {
     if (!btn) return;
     const badge = count === undefined ? ''
@@ -420,18 +421,56 @@ function updateFilterButtons() {
     btn.classList.toggle('active', on);
     btn.setAttribute('aria-pressed', String(on));
   };
-  const media = (btn, state, field, key, hasKey, withoutKey) => {
-    // Jumlah mengikuti saringan lain (wilayah, kata cari, media satunya) tetapi tidak dirinya sendiri
-    // Butir yang medianya belum termuat (undefined) tidak dihitung sebagai Ada maupun Tanpa
-    const pass = filterPredicate(key);
-    const n = State.mediaLoaded
-      ? all.filter(r => pass(r) && r[field] !== undefined && !!r[field] === (state !== 'without')).length : null;
-    setLabel(btn, msg(state === 'without' ? withoutKey : hasKey), n, !!state);
-  };
-  // Semua: tanpa jumlah — sudah jelas mencakup seluruh hasil
+
+  const isNoArticle = f.article === 'without' || f.article === 'no';
+  const isNoPhoto   = f.image   === 'without' || f.image   === 'no';
+  const aHas = !isNoArticle, pHas = !isNoPhoto; // tombol belum aktif dianggap "Ada"
+
+  // Data dasar: wilayah dan pencarian saja.
+  const q = (f.search || '').toLowerCase();
+  const base = all.filter(r =>
+    (f.wilayah === 'all' || r.provQids.includes(f.wilayah)) &&
+    (!q || [r.title, r.lokLabel, ...r.provLabels, ...(r.lokasi || []).map(l => l.label)]
+      .some(t => t?.toLowerCase().includes(q)))
+  );
+
+  // Matriks kuadran: quad[artikel ada][foto ada]
+  const quad = [[0, 0], [0, 0]];
+  for (const r of base) {
+    if (r.articleTitle === undefined || r.imageFilename === undefined) continue;
+    quad[r.articleTitle ? 1 : 0][r.imageFilename ? 1 : 0]++;
+  }
+  const qCell = (a, p) => quad[a ? 1 : 0][p ? 1 : 0];
+  const qArt  = a => qCell(a, true) + qCell(a, false);
+  const qPho  = p => qCell(true, p) + qCell(false, p);
+
+  // Jangkar: tombol yang pertama kali diaktifkan.
+  let anchor;
+  if (f.article && f.image) anchor = State.filterAnchor || 'article';
+  else if (f.article)       anchor = 'article';
+  else if (f.image)         anchor = 'image';
+  else                      anchor = null;
+  State.filterAnchor = anchor;
+
+  // Jumlah: null (spinner) selama media belum dimuat.
+  let articleCount = null, photoCount = null;
+  if (State.mediaLoaded) {
+    if (anchor === 'image') {
+      photoCount   = qPho(pHas);          // jangkar: total marginal
+      articleCount = qCell(aHas, pHas);   // irisan dengan foto
+    } else if (anchor === 'article') {
+      articleCount = qArt(aHas);          // jangkar: total marginal
+      photoCount   = qCell(aHas, pHas);   // irisan dengan artikel
+    } else {
+      articleCount = qArt(aHas);
+      photoCount   = qPho(pHas);
+    }
+  }
+
+  // Perbarui tombol.
   setLabel(DOM.btnSemua, msg('filter-all'), undefined, !hasFilter());
-  media(DOM.btnArtikel, f.article, 'articleTitle', 'article', 'filter-has-article', 'filter-no-article');
-  media(DOM.btnGambar,  f.image,   'imageFilename', 'image', 'filter-has-photo',  'filter-no-photo');
+  setLabel(DOM.btnArtikel, msg(isNoArticle ? 'filter-no-article' : 'filter-has-article'), articleCount, !!f.article);
+  setLabel(DOM.btnGambar,  msg(isNoPhoto   ? 'filter-no-photo'   : 'filter-has-photo'),   photoCount,   !!f.image);
   updateRegionCounts();
 }
 
